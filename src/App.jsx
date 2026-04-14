@@ -400,7 +400,19 @@ export default function App() {
     : filterOrg === "Entered" ? trials.filter(t => getStatus(t.id)==="entered" || getStatus(t.id)==="waitlist")
     : trials.filter(t => t.org === filterOrg);
   const daysUntil = d => { const n=Math.ceil((new Date(d)-today)/86400000); return n<0?"Passed":n===0?"Today!":n===1?"Tomorrow":`${n} days`; };
-  const openMaps  = (location) => window.open(`https://maps.google.com/?q=${encodeURIComponent(location)}`, "_blank");
+  const openMaps = (location) => {
+    const encoded = encodeURIComponent(location);
+    // Use maps:// for Apple Maps app on iOS, geo: for Android, fallback to Google Maps web
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isAndroid = /Android/.test(navigator.userAgent);
+    if (isIOS) {
+      window.open(`maps://?q=${encoded}`, "_blank");
+    } else if (isAndroid) {
+      window.open(`geo:0,0?q=${encoded}`, "_blank");
+    } else {
+      window.open(`https://maps.google.com/?q=${encoded}`, "_blank");
+    }
+  };
 
   // ════════════════════════════════════════════════════════════
   // AUTH LOADING
