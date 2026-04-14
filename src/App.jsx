@@ -200,14 +200,27 @@ export default function App() {
     e.preventDefault();
     setAccountMsg(""); setAccountError("");
     try {
+      // Re-authenticate first
       const credential = EmailAuthProvider.credential(auth.currentUser.email, accountForm.currentPassword);
       await reauthenticateWithCredential(auth.currentUser, credential);
-      await updateEmail(auth.currentUser, accountForm.email);
+      // Save all current user data
+      const snap = await getDoc(doc(db, "users", auth.currentUser.uid));
+      const userData = snap.exists() ? snap.data() : {};
+      const displayName = auth.currentUser.displayName;
+      const oldUid = auth.currentUser.uid;
+      // Delete old account
+      await deleteUser(auth.currentUser);
+      // Create new account with new email
+      const cred = await createUserWithEmailAndPassword(auth, accountForm.email, accountForm.currentPassword);
+      await updateProfile(cred.user, { displayName });
+      // Restore all data under new UID
+      await setDoc(doc(db, "users", cred.user.uid), userData);
       setAccountMsg("✅ Email updated successfully!");
       setAccountForm(f => ({...f, email:"", currentPassword:""}));
     } catch (err) {
       if (err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") setAccountError("Wrong current password.");
-      else if (err.code === "auth/email-already-in-use") setAccountError("That email is already in use.");
+      else if (err.code === "auth/email-already-in-use") setAccountError("That email is already registered.");
+      else if (err.code === "auth/invalid-email") setAccountError("Please enter a valid email address.");
       else setAccountError("Could not update email. Please try again.");
     }
   }
