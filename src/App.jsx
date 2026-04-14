@@ -69,6 +69,8 @@ export default function App() {
   const [filterOrg, setFilterOrg]           = useState("All");
   const [showResultForm, setShowResultForm] = useState(false);
   const [resultForm, setResultForm]         = useState({ org:"NACSW", trial:"", date:"", level:"", result:"Pass", title:"", notes:"", videoLink:"" });
+  const [showTitleForm, setShowTitleForm]   = useState(false);
+  const [titleForm, setTitleForm]           = useState({ org:"NACSW", title:"", trial:"", date:"" });
   const [resultPhotoFile, setResultPhotoFile] = useState(null);
   const [editingDogId, setEditingDogId]     = useState(null);
   const [dogForm, setDogForm]               = useState({});
@@ -331,6 +333,29 @@ export default function App() {
     await saveUserData({ results: newResults });
   }
   const myResults = activeDog ? (allResults[activeDog.id] || []) : [];
+
+  // ── Manual title entry ───────────────────────────────────────
+  async function addManualTitle(e) {
+    e.preventDefault();
+    if (!activeDog) return;
+    const newResult = {
+      id: Date.now().toString(),
+      org: titleForm.org,
+      trial: titleForm.trial || "Pre-app title",
+      date: titleForm.date || "",
+      level: "",
+      result: "Pass",
+      title: titleForm.title,
+      notes: "Title entered manually",
+      photoUrl: "",
+      videoLink: "",
+    };
+    const newResults = { ...allResults, [activeDog.id]: [...(allResults[activeDog.id]||[]), newResult] };
+    setAllResults(newResults);
+    setShowTitleForm(false);
+    setTitleForm({ org:"NACSW", title:"", trial:"", date:"" });
+    await saveUserData({ results: newResults });
+  }
 
   // ── Photo upload to Firebase Storage ────────────────────────
   async function handlePhoto(dogId, file) {
@@ -854,7 +879,32 @@ export default function App() {
         {/* TITLES */}
         {tab==="Titles" && (
           <div>
-            <div style={{ fontWeight:"bold", fontSize:16, marginBottom:16, color:"#5b21b6" }}>🏆 {activeDog?.callName}'s Titles</div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <div style={{ fontWeight:"bold", fontSize:16, color:"#5b21b6" }}>🏆 {activeDog?.callName}'s Titles</div>
+              <button onClick={()=>setShowTitleForm(!showTitleForm)} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", fontSize:12, padding:"6px 14px" }}>+ Add Existing Title</button>
+            </div>
+
+            {showTitleForm && (
+              <form onSubmit={addManualTitle} style={formStyle}>
+                <div style={formTitle}>Add an Existing Title</div>
+                <div style={{ fontSize:12, color:"#888", marginBottom:12 }}>Use this to enter titles your dog already earned before using this app.</div>
+                <label style={labelStyle}>Organization</label>
+                <select style={inputStyle} value={titleForm.org} onChange={e=>setTitleForm({...titleForm,org:e.target.value})}>
+                  {ORGS.map(o=><option key={o}>{o}</option>)}
+                </select>
+                <label style={labelStyle}>Title *</label>
+                <input required style={inputStyle} value={titleForm.title} onChange={e=>setTitleForm({...titleForm,title:e.target.value})} placeholder="e.g. NW1, SBN, L1C, NN…" />
+                <label style={labelStyle}>Trial Name</label>
+                <input style={inputStyle} value={titleForm.trial} onChange={e=>setTitleForm({...titleForm,trial:e.target.value})} placeholder="e.g. Spring NW1 Trial (optional)" />
+                <label style={labelStyle}>Date Earned</label>
+                <input type="date" style={inputStyle} value={titleForm.date} onChange={e=>setTitleForm({...titleForm,date:e.target.value})} />
+                <div style={{ display:"flex", gap:8, marginTop:12 }}>
+                  <button type="submit" style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)" }}>Save Title</button>
+                  <button type="button" onClick={()=>setShowTitleForm(false)} style={btnStyle("#aaa")}>Cancel</button>
+                </div>
+              </form>
+            )}
+
             {ORGS.map(org=>{
               const orgTitles = titlesEarned.filter(t=>t.org===org);
               return (
@@ -865,7 +915,13 @@ export default function App() {
                     : orgTitles.map((t,i)=>(
                         <div key={i} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6, background:"rgba(255,255,255,0.6)", borderRadius:8, padding:"8px 12px" }}>
                           <span style={{ fontSize:20 }}>🏅</span>
-                          <div><div style={{ fontWeight:"bold" }}>{t.title}</div><div style={{ fontSize:11, color:"#888" }}>{t.trial} · {t.date}</div></div>
+                          <div>
+                            <div style={{ fontWeight:"bold" }}>{t.title}</div>
+                            <div style={{ fontSize:11, color:"#888" }}>
+                              {t.trial}{t.trial && t.date ? " · " : ""}{t.date}
+                              {t.trial==="Pre-app title" && !t.date ? <span style={{ color:"#bbb" }}> · manually entered</span> : ""}
+                            </div>
+                          </div>
                         </div>
                       ))
                   }
