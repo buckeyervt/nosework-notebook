@@ -89,7 +89,7 @@ export default function App() {
     const unsub = onAuthStateChanged(auth, async u => {
       setUser(u);
       setAuthLoading(false);
-      if (u) await loadUserData(u.uid);
+      if (!u) setDataLoaded(false);
     });
     return () => unsub();
   }, []);
@@ -103,23 +103,22 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // ── Load user data from Firebase ─────────────────────────────
-  async function loadUserData(uid) {
-    try {
-      const snap = await getDoc(doc(db, "users", uid));
+  // ── Load user data from Firebase (real-time) ─────────────────
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(doc(db, "users", user.uid), snap => {
       if (snap.exists()) {
         const data = snap.data();
         setDogs(data.dogs || []);
-        setActiveDogId(data.activeDogId || null);
+        setActiveDogId(id => id || data.activeDogId || null);
         setRegistrations(data.registrations || {});
         setAllResults(data.results || {});
         setPhotos(data.photos || {});
       }
       setDataLoaded(true);
-    } catch (e) {
-      setDataLoaded(true);
-    }
-  }
+    }, () => setDataLoaded(true));
+    return () => unsub();
+  }, [user]);
 
   // ── Save user data to Firebase ───────────────────────────────
   async function saveUserData(updates) {
