@@ -57,7 +57,7 @@ export default function App() {
   const [adminPin, setAdminPin]           = useState("");
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminTab, setAdminTab]           = useState("list");
-  const [trialForm, setTrialForm]         = useState({ org:"NACSW", name:"", date:"", location:"", level:"", entryDeadline:"", entryLink:"", notes:"", adminNotes:"", needsInfo:false });
+  const [trialForm, setTrialForm]         = useState({ org:"NACSW", name:"", date:"", location:"", level:"", entryOpens:"", entryDeadline:"", entryLink:"", notes:"", adminNotes:"", needsInfo:false });
   const [adminFilter, setAdminFilter]     = useState("all"); // all | needsinfo
   const [quickEditId, setQuickEditId]     = useState(null);
   const [quickEditLink, setQuickEditLink] = useState("");
@@ -395,6 +395,7 @@ export default function App() {
   // ── Derived ──────────────────────────────────────────────────
   const upcoming     = trials.filter(t => new Date(t.date) >= today);
   const deadlineSoon = trials.filter(t => { const d=(new Date(t.entryDeadline)-today)/86400000; return d>=0&&d<=14&&getStatus(t.id)==="none"; });
+  const opensSoon    = trials.filter(t => { const d=(new Date(t.entryOpens)-today)/86400000; return d>=0&&d<=7&&getStatus(t.id)==="none"; });
   const titlesEarned = myResults.filter(r=>r.title).map(r=>({org:r.org,title:r.title,date:r.date,trial:r.trial}));
   const filtered = filterOrg === "All" ? trials
     : filterOrg === "Entered" ? trials.filter(t => getStatus(t.id)==="entered" || getStatus(t.id)==="waitlist")
@@ -551,7 +552,7 @@ export default function App() {
           <div>
             <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
               {[["list","📋 All Trials"],["add","➕ Add Trial"],["seed","🚀 Seed DB"]].map(([t,l]) => (
-                <button key={t} onClick={()=>{setAdminTab(t);if(t!=="add"){setEditingTrialId(null);setTrialForm({org:"NACSW",name:"",date:"",location:"",level:"",entryDeadline:"",entryLink:"",notes:"",adminNotes:"",needsInfo:false});}}}
+                <button key={t} onClick={()=>{setAdminTab(t);if(t!=="add"){setEditingTrialId(null);setTrialForm({org:"NACSW",name:"",date:"",location:"",level:"",entryOpens:"",entryDeadline:"",entryLink:"",notes:"",adminNotes:"",needsInfo:false});}}}
                   style={{ ...btnStyle(adminTab===t?"#7c3aed":"#aaa"), padding:"6px 14px", fontSize:13, ...(adminTab===t?{background:"linear-gradient(135deg,#7c3aed,#06b6d4)"}:{}) }}>{l}</button>
               ))}
             </div>
@@ -573,10 +574,12 @@ export default function App() {
                   <div><label style={labelStyle}>Trial Date *</label><input required type="date" style={inputStyle} value={trialForm.date} onChange={e=>setTrialForm({...trialForm,date:e.target.value})} /></div>
                   <div><label style={labelStyle}>Entry Deadline</label><input type="date" style={inputStyle} value={trialForm.entryDeadline} onChange={e=>setTrialForm({...trialForm,entryDeadline:e.target.value})} /></div>
                 </div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                  <div><label style={labelStyle}>Entry Opens</label><input type="date" style={inputStyle} value={trialForm.entryOpens||""} onChange={e=>setTrialForm({...trialForm,entryOpens:e.target.value})} /></div>
+                  <div><label style={labelStyle}>Level / Classes</label><input style={inputStyle} value={trialForm.level} onChange={e=>setTrialForm({...trialForm,level:e.target.value})} placeholder="e.g. NW1/NW2, Novice A" /></div>
+                </div>
                 <label style={labelStyle}>Location</label>
                 <input style={inputStyle} value={trialForm.location} onChange={e=>setTrialForm({...trialForm,location:e.target.value})} placeholder="Venue, City, TX" />
-                <label style={labelStyle}>Level / Classes</label>
-                <input style={inputStyle} value={trialForm.level} onChange={e=>setTrialForm({...trialForm,level:e.target.value})} placeholder="e.g. NW1/NW2, Novice A" />
                 <label style={labelStyle}>Entry Link (URL)</label>
                 <input style={inputStyle} value={trialForm.entryLink||""} onChange={e=>setTrialForm({...trialForm,entryLink:e.target.value})} placeholder="https://secreterrier.com/events/..." />
                 <label style={labelStyle}>Public Notes <span style={{ color:"#aaa", fontWeight:"normal" }}>(everyone sees this)</span></label>
@@ -635,6 +638,7 @@ export default function App() {
                         <div style={{ fontSize:11, color:"#888", marginTop:2 }}>{t.date} · {t.location||"📍 Location TBD"}</div>
                         {!t.entryLink&&<div style={{ fontSize:11, color:"#f59e0b", marginTop:2 }}>⚠️ No entry link yet</div>}
                         {!t.entryDeadline&&<div style={{ fontSize:11, color:"#f59e0b", marginTop:1 }}>⚠️ No deadline set</div>}
+                        {!t.entryOpens&&<div style={{ fontSize:11, color:"#f59e0b", marginTop:1 }}>⚠️ No entry open date set</div>}
                         {t.adminNotes&&<div style={{ fontSize:11, color:"#b45309", background:"#fffbeb", borderRadius:6, padding:"3px 8px", marginTop:4 }}>🔒 {t.adminNotes}</div>}
 
                         {/* Quick edit inline */}
@@ -717,6 +721,17 @@ export default function App() {
         {/* DASHBOARD */}
         {tab==="Dashboard" && (
           <div>
+            {opensSoon.length>0&&(
+              <div style={{ background:"#eff6ff", border:"1px solid #93c5fd", borderRadius:10, padding:"12px 16px", marginBottom:12 }}>
+                <div style={{ fontWeight:"bold", color:"#1d4ed8", marginBottom:6 }}>🔔 Entries Opening Soon</div>
+                {opensSoon.map(t=>(
+                  <div key={t.id} style={{ fontSize:13, color:"#1e40af", display:"flex", justifyContent:"space-between", marginBottom:3 }}>
+                    <span>{t.name.split("–")[0].trim()} <OrgBadge org={t.org}/></span>
+                    <b>{daysUntil(t.entryOpens)}</b>
+                  </div>
+                ))}
+              </div>
+            )}
             {deadlineSoon.length>0&&(
               <div style={{ background:"#fef9c3", border:"1px solid #fde047", borderRadius:10, padding:"12px 16px", marginBottom:16 }}>
                 <div style={{ fontWeight:"bold", color:"#713f12", marginBottom:6 }}>⚠️ Entry Deadlines Soon</div>
@@ -782,6 +797,9 @@ export default function App() {
                         </span>
                       </div>
                       {t.entryDeadline&&<div style={{ fontSize:11, color:new Date(t.entryDeadline)<today?"#c0392b":"#e07b39", marginTop:3 }}>📌 Deadline: {t.entryDeadline} · {daysUntil(t.entryDeadline)}</div>}
+                      {t.entryOpens&&<div style={{ fontSize:11, color: new Date(t.entryOpens)<=today?"#27ae60":"#3a7bd5", marginTop:2, fontWeight: new Date(t.entryOpens)<=today?"bold":"normal" }}>
+                        {new Date(t.entryOpens)<=today ? "🟢 Entries Open!" : `🔔 Opens: ${t.entryOpens} · ${daysUntil(t.entryOpens)}`}
+                      </div>}
                       {/* Enter Now button — below deadline, full width feel */}
                       {status==="none" && t.entryLink && (
                         <button onClick={()=>window.open(t.entryLink,"_blank")} style={{
