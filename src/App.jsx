@@ -775,7 +775,6 @@ export default function App() {
                     <div style={{ flex:1, marginRight:8 }}>
                       <div style={{ fontWeight:"bold", fontSize:14 }}>{t.name}</div>
                       <div style={{ fontSize:11, color:"#888", marginTop:2 }}><OrgBadge org={t.org}/> · {t.level}</div>
-                      {/* Tappable location → Google Maps */}
                       <div style={{ fontSize:12, color:"#555", marginTop:5 }}>
                         📅 <b>{t.date}</b> ·{" "}
                         <span onClick={()=>openMaps(t.location)} style={{ color:"#7c3aed", cursor:"pointer", textDecoration:"underline" }}>
@@ -783,9 +782,19 @@ export default function App() {
                         </span>
                       </div>
                       {t.entryDeadline&&<div style={{ fontSize:11, color:new Date(t.entryDeadline)<today?"#c0392b":"#e07b39", marginTop:3 }}>📌 Deadline: {t.entryDeadline} · {daysUntil(t.entryDeadline)}</div>}
+                      {/* Enter Now button — below deadline, full width feel */}
+                      {status==="none" && t.entryLink && (
+                        <button onClick={()=>window.open(t.entryLink,"_blank")} style={{
+                          background:"linear-gradient(135deg,#7c3aed,#06b6d4)", color:"#fff",
+                          border:"none", borderRadius:20, padding:"5px 16px", fontSize:11,
+                          cursor:"pointer", fontWeight:"bold", marginTop:6, display:"inline-block"
+                        }}>
+                          🔗 Enter Now →
+                        </button>
+                      )}
                       {t.notes&&<div style={{ fontSize:11, color:"#999", marginTop:4, fontStyle:"italic" }}>{t.notes}</div>}
                     </div>
-                    {/* Status button */}
+                    {/* Status buttons — right side only */}
                     <div style={{ display:"flex", flexDirection:"column", gap:4, flexShrink:0, alignItems:"flex-end" }}>
                       <div style={{ display:"flex", gap:4 }}>
                         {["none","waitlist","entered"].map(s => (
@@ -808,15 +817,6 @@ export default function App() {
                           borderRadius:20, padding:"3px 10px", fontSize:10, cursor:"pointer", fontWeight:"bold"
                         }}>
                           {paid ? "💳 Paid ✓" : "💳 Unpaid"}
-                        </button>
-                      )}
-                      {/* Entry link — only show if not entered */}
-                      {status==="none" && t.entryLink && (
-                        <button onClick={()=>window.open(t.entryLink,"_blank")} style={{
-                          background:"linear-gradient(135deg,#7c3aed,#06b6d4)", color:"#fff",
-                          border:"none", borderRadius:20, padding:"3px 10px", fontSize:10, cursor:"pointer"
-                        }}>
-                          Enter Now →
                         </button>
                       )}
                     </div>
