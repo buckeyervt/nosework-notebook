@@ -997,7 +997,13 @@ export default function App() {
               </form>
             )}
           </div>
-        )}({org,size=11}) {
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OrgBadge({org,size=11}) {
   return <span style={{ background:(ORG_COLORS[org]||"#999")+"22", color:ORG_COLORS[org]||"#999", borderRadius:20, padding:"2px 8px", fontSize:size, fontWeight:"bold", display:"inline-block" }}>{org}</span>;
 }
 function StatCard({label,value,icon,small}) {
