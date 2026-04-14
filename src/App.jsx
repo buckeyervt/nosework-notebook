@@ -926,7 +926,7 @@ export default function App() {
                   })}
                 </div>
                 <div style={{ marginTop:16, display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
-                  <StatCard label="Entered" value={Object.values(dogRegs).filter(Boolean).length} icon="📋" small/>
+                  <StatCard label="Entered" value={Object.values(dogRegs).filter(v=>v?.status==="entered").length} icon="📋" small/>
                   <StatCard label="Results" value={myResults.length} icon="✅" small/>
                   <StatCard label="Titles" value={titlesEarned.length} icon="🏆" small/>
                 </div>
