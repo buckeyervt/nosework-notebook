@@ -61,6 +61,8 @@ export default function App() {
   const [adminFilter, setAdminFilter]     = useState("all"); // all | needsinfo
   const [quickEditId, setQuickEditId]     = useState(null);
   const [quickEditLink, setQuickEditLink] = useState("");
+  const [quickEditMode, setQuickEditMode] = useState("link"); // "link" | "location"
+  const [quickEditLocation, setQuickEditLocation] = useState("");
   const [editingTrialId, setEditingTrialId] = useState(null);
 
   // ── UI ───────────────────────────────────────────────────────
@@ -583,15 +585,32 @@ export default function App() {
                         {!t.entryDeadline&&<div style={{ fontSize:11, color:"#f59e0b", marginTop:1 }}>⚠️ No deadline set</div>}
                         {t.adminNotes&&<div style={{ fontSize:11, color:"#b45309", background:"#fffbeb", borderRadius:6, padding:"3px 8px", marginTop:4 }}>🔒 {t.adminNotes}</div>}
 
-                        {/* Quick edit entry link inline */}
+                        {/* Quick edit inline */}
                         {quickEditId===t.id ? (
-                          <div style={{ display:"flex", gap:6, marginTop:6 }}>
-                            <input style={{...inputStyle, fontSize:11, marginBottom:0, flex:1}} placeholder="Paste entry URL…" value={quickEditLink} onChange={e=>setQuickEditLink(e.target.value)} autoFocus/>
-                            <button onClick={async()=>{ await setDoc(doc(db,"trials",t.id),{...t,entryLink:quickEditLink},{merge:true}); setQuickEditId(null); setQuickEditLink(""); }} style={{ ...btnStyle("#27ae60"), padding:"4px 10px", fontSize:11 }}>Save</button>
-                            <button onClick={()=>{setQuickEditId(null);setQuickEditLink("");}} style={{ ...btnStyle("#aaa"), padding:"4px 8px", fontSize:11 }}>✕</button>
+                          <div style={{ marginTop:6 }}>
+                            <div style={{ display:"flex", gap:4, marginBottom:6 }}>
+                              <button onClick={()=>setQuickEditMode("link")} style={{ fontSize:10, background:quickEditMode==="link"?"#7c3aed":"#ede9fe", color:quickEditMode==="link"?"#fff":"#7c3aed", border:"none", borderRadius:20, padding:"2px 8px", cursor:"pointer" }}>🔗 Entry Link</button>
+                              <button onClick={()=>setQuickEditMode("location")} style={{ fontSize:10, background:quickEditMode==="location"?"#7c3aed":"#ede9fe", color:quickEditMode==="location"?"#fff":"#7c3aed", border:"none", borderRadius:20, padding:"2px 8px", cursor:"pointer" }}>📍 Location</button>
+                            </div>
+                            {quickEditMode==="link" ? (
+                              <div style={{ display:"flex", gap:6 }}>
+                                <input style={{...inputStyle, fontSize:11, marginBottom:0, flex:1}} placeholder="Paste entry URL…" value={quickEditLink} onChange={e=>setQuickEditLink(e.target.value)} autoFocus/>
+                                <button onClick={async()=>{ await setDoc(doc(db,"trials",t.id),{...t,entryLink:quickEditLink},{merge:true}); setQuickEditId(null); setQuickEditLink(""); }} style={{ ...btnStyle("#27ae60"), padding:"4px 10px", fontSize:11 }}>Save</button>
+                                <button onClick={()=>{setQuickEditId(null);setQuickEditLink("");}} style={{ ...btnStyle("#aaa"), padding:"4px 8px", fontSize:11 }}>✕</button>
+                              </div>
+                            ) : (
+                              <div style={{ display:"flex", gap:6 }}>
+                                <input style={{...inputStyle, fontSize:11, marginBottom:0, flex:1}} placeholder="Venue, City, TX..." value={quickEditLocation} onChange={e=>setQuickEditLocation(e.target.value)} autoFocus/>
+                                <button onClick={async()=>{ await setDoc(doc(db,"trials",t.id),{...t,location:quickEditLocation},{merge:true}); setQuickEditId(null); setQuickEditLocation(""); }} style={{ ...btnStyle("#27ae60"), padding:"4px 10px", fontSize:11 }}>Save</button>
+                                <button onClick={()=>{setQuickEditId(null);setQuickEditLocation("");}} style={{ ...btnStyle("#aaa"), padding:"4px 8px", fontSize:11 }}>✕</button>
+                              </div>
+                            )}
                           </div>
                         ) : (
-                          !t.entryLink && <button onClick={()=>{setQuickEditId(t.id);setQuickEditLink(t.entryLink||"");}} style={{ fontSize:11, color:"#7c3aed", background:"none", border:"none", cursor:"pointer", padding:"2px 0", marginTop:2, textDecoration:"underline" }}>+ Add entry link</button>
+                          <div style={{ display:"flex", gap:8, marginTop:4, flexWrap:"wrap" }}>
+                            {!t.entryLink && <button onClick={()=>{setQuickEditId(t.id);setQuickEditMode("link");setQuickEditLink("");}} style={{ fontSize:11, color:"#7c3aed", background:"none", border:"none", cursor:"pointer", padding:0, textDecoration:"underline" }}>+ Add entry link</button>}
+                            <button onClick={()=>{setQuickEditId(t.id);setQuickEditMode("location");setQuickEditLocation(t.location||"");}} style={{ fontSize:11, color:"#7c3aed", background:"none", border:"none", cursor:"pointer", padding:0, textDecoration:"underline" }}>📍 Update location</button>
+                          </div>
                         )}
                       </div>
                       <div style={{ display:"flex", gap:6, flexShrink:0 }}>
