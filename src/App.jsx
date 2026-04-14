@@ -7,8 +7,11 @@ import {
 } from "firebase/firestore";
 import {
   getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
-  signOut, onAuthStateChanged, sendPasswordResetEmail, updateProfile
+  signOut, onAuthStateChanged, sendPasswordResetEmail, updateProfile,
+  updateEmail, updatePassword, deleteUser, EmailAuthProvider, reauthenticateWithCredential
 } from "firebase/auth";
+import { storage } from "./firebase";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 // ── Constants ────────────────────────────────────────────────
 const ORGS = ["NACSW", "UKC", "AKC", "USCSS/Other"];
@@ -24,7 +27,7 @@ const ORG_IDS = [
 ];
 
 const auth = getAuth();
-const TABS = ["Dashboard", "Trials", "Results", "Titles", "My Dogs"];
+const TABS = ["Dashboard", "Trials", "Results", "Titles", "My Dogs", "Account"];
 const blankDog = () => ({ id: Date.now().toString(), callName:"", name:"", breed:"", dob:"", nacsw:"", akc:"", ukc:"", uscss:"" });
 
 export default function App() {
@@ -54,18 +57,29 @@ export default function App() {
   const [adminPin, setAdminPin]           = useState("");
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminTab, setAdminTab]           = useState("list");
-  const [trialForm, setTrialForm]         = useState({ org:"NACSW", name:"", date:"", location:"", level:"", entryDeadline:"", notes:"" });
+  const [trialForm, setTrialForm]         = useState({ org:"NACSW", name:"", date:"", location:"", level:"", entryDeadline:"", entryLink:"", notes:"", adminNotes:"", needsInfo:false });
+  const [adminFilter, setAdminFilter]     = useState("all"); // all | needsinfo
+  const [quickEditId, setQuickEditId]     = useState(null);
+  const [quickEditLink, setQuickEditLink] = useState("");
   const [editingTrialId, setEditingTrialId] = useState(null);
 
   // ── UI ───────────────────────────────────────────────────────
   const [filterOrg, setFilterOrg]           = useState("All");
   const [showResultForm, setShowResultForm] = useState(false);
-  const [resultForm, setResultForm]         = useState({ org:"NACSW", trial:"", date:"", level:"", result:"Pass", title:"", notes:"" });
+  const [resultForm, setResultForm]         = useState({ org:"NACSW", trial:"", date:"", level:"", result:"Pass", title:"", notes:"", videoLink:"" });
+  const [resultPhotoFile, setResultPhotoFile] = useState(null);
   const [editingDogId, setEditingDogId]     = useState(null);
   const [dogForm, setDogForm]               = useState({});
   const [deleteConfirm, setDeleteConfirm]   = useState(null);
   const [onboardStep, setOnboardStep]       = useState(0);
   const [onboardDog, setOnboardDog]         = useState(blankDog());
+
+  // ── Account settings state ───────────────────────────────────
+  const [accountForm, setAccountForm]       = useState({ name:"", email:"", newPassword:"", currentPassword:"" });
+  const [accountMsg, setAccountMsg]         = useState("");
+  const [accountError, setAccountError]     = useState("");
+  const [showDeleteAccount, setShowDeleteAccount] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
 
   const activeDog = dogs.find(d => d.id === activeDogId) || dogs[0];
   const today = new Date();
@@ -171,6 +185,66 @@ export default function App() {
     setAllResults({}); setPhotos({}); setDataLoaded(false);
   }
 
+  // ── Account management ───────────────────────────────────────
+  async function updateAccountName(e) {
+    e.preventDefault();
+    setAccountMsg(""); setAccountError("");
+    try {
+      await updateProfile(auth.currentUser, { displayName: accountForm.name });
+      setAccountMsg("✅ Name updated successfully!");
+      setAccountForm(f => ({...f, name:""}));
+    } catch (err) { setAccountError("Could not update name. Please try again."); }
+  }
+
+  async function updateAccountEmail(e) {
+    e.preventDefault();
+    setAccountMsg(""); setAccountError("");
+    try {
+      const credential = EmailAuthProvider.credential(auth.currentUser.email, accountForm.currentPassword);
+      await reauthenticateWithCredential(auth.currentUser, credential);
+      await updateEmail(auth.currentUser, accountForm.email);
+      setAccountMsg("✅ Email updated successfully!");
+      setAccountForm(f => ({...f, email:"", currentPassword:""}));
+    } catch (err) {
+      if (err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") setAccountError("Wrong current password.");
+      else if (err.code === "auth/email-already-in-use") setAccountError("That email is already in use.");
+      else setAccountError("Could not update email. Please try again.");
+    }
+  }
+
+  async function updateAccountPassword(e) {
+    e.preventDefault();
+    setAccountMsg(""); setAccountError("");
+    try {
+      const credential = EmailAuthProvider.credential(auth.currentUser.email, accountForm.currentPassword);
+      await reauthenticateWithCredential(auth.currentUser, credential);
+      await updatePassword(auth.currentUser, accountForm.newPassword);
+      setAccountMsg("✅ Password updated successfully!");
+      setAccountForm(f => ({...f, newPassword:"", currentPassword:""}));
+    } catch (err) {
+      if (err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") setAccountError("Wrong current password.");
+      else setAccountError("Could not update password. Please try again.");
+    }
+  }
+
+  async function handleDeleteAccount(e) {
+    e.preventDefault();
+    setAccountError("");
+    try {
+      const credential = EmailAuthProvider.credential(auth.currentUser.email, deletePassword);
+      await reauthenticateWithCredential(auth.currentUser, credential);
+      // Delete user data from Firestore
+      await deleteDoc(doc(db, "users", auth.currentUser.uid));
+      // Delete auth account
+      await deleteUser(auth.currentUser);
+      setDogs([]); setActiveDogId(null); setRegistrations({});
+      setAllResults({}); setPhotos({}); setDataLoaded(false);
+    } catch (err) {
+      if (err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") setAccountError("Wrong password. Account not deleted.");
+      else setAccountError("Could not delete account. Please try again.");
+    }
+  }
+
   // ── Onboarding (first dog setup) ─────────────────────────────
   async function finishOnboarding() {
     const dog = { ...onboardDog, id: Date.now().toString() };
@@ -202,40 +276,62 @@ export default function App() {
     await saveUserData({ dogs: rem, activeDogId: newActiveId });
   }
 
-  // ── Registrations ────────────────────────────────────────────
-  async function toggleReg(trialId) {
+  // ── Registrations — status + paid ────────────────────────────
+  // dogRegs[dogId][trialId] = { status: "none"|"waitlist"|"entered", paid: bool }
+  async function setTrialStatus(trialId, status) {
     if (!activeDog) return;
-    const newRegs = {
-      ...registrations,
-      [activeDog.id]: { ...(registrations[activeDog.id]||{}), [trialId]: !(registrations[activeDog.id]?.[trialId]) }
-    };
+    const current = dogRegs[trialId] || { status:"none", paid:false };
+    const updated = { ...current, status };
+    const newRegs = { ...registrations, [activeDog.id]: { ...(registrations[activeDog.id]||{}), [trialId]: updated }};
+    setRegistrations(newRegs);
+    await saveUserData({ registrations: newRegs });
+  }
+  async function togglePaid(trialId) {
+    if (!activeDog) return;
+    const current = dogRegs[trialId] || { status:"none", paid:false };
+    const updated = { ...current, paid: !current.paid };
+    const newRegs = { ...registrations, [activeDog.id]: { ...(registrations[activeDog.id]||{}), [trialId]: updated }};
     setRegistrations(newRegs);
     await saveUserData({ registrations: newRegs });
   }
   const dogRegs = activeDog ? (registrations[activeDog.id] || {}) : {};
+  const getStatus = (trialId) => dogRegs[trialId]?.status || "none";
+  const getPaid   = (trialId) => dogRegs[trialId]?.paid || false;
 
   // ── Results ──────────────────────────────────────────────────
   async function addResult(e) {
     e.preventDefault();
     if (!activeDog) return;
-    const newResult = { ...resultForm, id: Date.now().toString() };
+    let photoUrl = "";
+    if (resultPhotoFile) {
+      try {
+        const storageRef = ref(storage, `ribbons/${user.uid}/${Date.now()}`);
+        await uploadBytes(storageRef, resultPhotoFile);
+        photoUrl = await getDownloadURL(storageRef);
+      } catch (err) { console.error("Ribbon photo error:", err); }
+    }
+    const newResult = { ...resultForm, id: Date.now().toString(), photoUrl };
     const newResults = { ...allResults, [activeDog.id]: [...(allResults[activeDog.id]||[]), newResult] };
-    setAllResults(newResults); setShowResultForm(false);
-    setResultForm({ org:"NACSW", trial:"", date:"", level:"", result:"Pass", title:"", notes:"" });
+    setAllResults(newResults); setShowResultForm(false); setResultPhotoFile(null);
+    setResultForm({ org:"NACSW", trial:"", date:"", level:"", result:"Pass", title:"", notes:"", videoLink:"" });
     await saveUserData({ results: newResults });
   }
   const myResults = activeDog ? (allResults[activeDog.id] || []) : [];
 
-  // ── Photo upload ─────────────────────────────────────────────
+  // ── Photo upload to Firebase Storage ────────────────────────
   async function handlePhoto(dogId, file) {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async ev => {
-      const newPhotos = { ...photos, [dogId]: ev.target.result };
+    if (!file || !user) return;
+    try {
+      const storageRef = ref(storage, `photos/${user.uid}/${dogId}`);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      const newPhotos = { ...photos, [dogId]: url };
       setPhotos(newPhotos);
       await saveUserData({ photos: newPhotos });
-    };
-    reader.readAsDataURL(file);
+    } catch (e) {
+      console.error("Photo upload error:", e);
+      alert("Photo upload failed. Please try again.");
+    }
   }
 
   // ── Admin ────────────────────────────────────────────────────
@@ -249,7 +345,7 @@ export default function App() {
     e.preventDefault();
     const id = editingTrialId || `t_${Date.now()}`;
     await setDoc(doc(db, "trials", id), { ...trialForm, id });
-    setTrialForm({ org:"NACSW", name:"", date:"", location:"", level:"", entryDeadline:"", notes:"" });
+    setTrialForm({ org:"NACSW", name:"", date:"", location:"", level:"", entryDeadline:"", entryLink:"", notes:"" });
     setEditingTrialId(null); setAdminTab("list");
     alert("✅ Saved! Everyone's app will update automatically.");
   }
@@ -259,10 +355,13 @@ export default function App() {
 
   // ── Derived ──────────────────────────────────────────────────
   const upcoming     = trials.filter(t => new Date(t.date) >= today);
-  const deadlineSoon = trials.filter(t => { const d=(new Date(t.entryDeadline)-today)/86400000; return d>=0&&d<=14&&!dogRegs[t.id]; });
+  const deadlineSoon = trials.filter(t => { const d=(new Date(t.entryDeadline)-today)/86400000; return d>=0&&d<=14&&getStatus(t.id)==="none"; });
   const titlesEarned = myResults.filter(r=>r.title).map(r=>({org:r.org,title:r.title,date:r.date,trial:r.trial}));
-  const filtered     = filterOrg==="All" ? trials : trials.filter(t=>t.org===filterOrg);
-  const daysUntil    = d => { const n=Math.ceil((new Date(d)-today)/86400000); return n<0?"Passed":n===0?"Today!":n===1?"Tomorrow":`${n} days`; };
+  const filtered = filterOrg === "All" ? trials
+    : filterOrg === "Entered" ? trials.filter(t => getStatus(t.id)==="entered" || getStatus(t.id)==="waitlist")
+    : trials.filter(t => t.org === filterOrg);
+  const daysUntil = d => { const n=Math.ceil((new Date(d)-today)/86400000); return n<0?"Passed":n===0?"Today!":n===1?"Tomorrow":`${n} days`; };
+  const openMaps  = (location) => window.open(`https://maps.google.com/?q=${encodeURIComponent(location)}`, "_blank");
 
   // ════════════════════════════════════════════════════════════
   // AUTH LOADING
@@ -401,13 +500,20 @@ export default function App() {
           <div>
             <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
               {[["list","📋 All Trials"],["add","➕ Add Trial"],["seed","🚀 Seed DB"]].map(([t,l]) => (
-                <button key={t} onClick={()=>{setAdminTab(t);if(t!=="add"){setEditingTrialId(null);setTrialForm({org:"NACSW",name:"",date:"",location:"",level:"",entryDeadline:"",notes:""});}}}
+                <button key={t} onClick={()=>{setAdminTab(t);if(t!=="add"){setEditingTrialId(null);setTrialForm({org:"NACSW",name:"",date:"",location:"",level:"",entryDeadline:"",entryLink:"",notes:"",adminNotes:"",needsInfo:false});}}}
                   style={{ ...btnStyle(adminTab===t?"#7c3aed":"#aaa"), padding:"6px 14px", fontSize:13, ...(adminTab===t?{background:"linear-gradient(135deg,#7c3aed,#06b6d4)"}:{}) }}>{l}</button>
               ))}
             </div>
             {(adminTab==="add"||editingTrialId) && (
               <form onSubmit={saveAdminTrial} style={formStyle}>
                 <div style={formTitle}>{editingTrialId?"✏️ Edit Trial":"➕ New Trial"}</div>
+
+                {/* Needs Info flag */}
+                <label style={{ display:"flex", alignItems:"center", gap:10, cursor:"pointer", background: trialForm.needsInfo?"#fff8e1":"#f5f3ff", borderRadius:8, padding:"8px 12px", marginBottom:8, border:`1px solid ${trialForm.needsInfo?"#f59e0b":"#e9d5ff"}` }}>
+                  <input type="checkbox" checked={trialForm.needsInfo||false} onChange={e=>setTrialForm({...trialForm,needsInfo:e.target.checked})} style={{ width:16, height:16 }}/>
+                  <span style={{ fontSize:13, color: trialForm.needsInfo?"#b45309":"#5b21b6", fontWeight:"bold" }}>⚠️ Needs more info — flag for follow-up</span>
+                </label>
+
                 <label style={labelStyle}>Organization</label>
                 <select style={inputStyle} value={trialForm.org} onChange={e=>setTrialForm({...trialForm,org:e.target.value})}>{ORGS.map(o=><option key={o}>{o}</option>)}</select>
                 <label style={labelStyle}>Trial Name *</label>
@@ -420,8 +526,12 @@ export default function App() {
                 <input style={inputStyle} value={trialForm.location} onChange={e=>setTrialForm({...trialForm,location:e.target.value})} placeholder="Venue, City, TX" />
                 <label style={labelStyle}>Level / Classes</label>
                 <input style={inputStyle} value={trialForm.level} onChange={e=>setTrialForm({...trialForm,level:e.target.value})} placeholder="e.g. NW1/NW2, Novice A" />
-                <label style={labelStyle}>Notes</label>
-                <textarea style={{...inputStyle,height:56}} value={trialForm.notes} onChange={e=>setTrialForm({...trialForm,notes:e.target.value})} placeholder="Entry link, contact, notes…" />
+                <label style={labelStyle}>Entry Link (URL)</label>
+                <input style={inputStyle} value={trialForm.entryLink||""} onChange={e=>setTrialForm({...trialForm,entryLink:e.target.value})} placeholder="https://secreterrier.com/events/..." />
+                <label style={labelStyle}>Public Notes <span style={{ color:"#aaa", fontWeight:"normal" }}>(everyone sees this)</span></label>
+                <textarea style={{...inputStyle,height:56}} value={trialForm.notes} onChange={e=>setTrialForm({...trialForm,notes:e.target.value})} placeholder="Contact email, special info, full/waitlist status…" />
+                <label style={labelStyle}>🔒 Admin Notes <span style={{ color:"#aaa", fontWeight:"normal" }}>(only you see this)</span></label>
+                <textarea style={{...inputStyle,height:56, background:"#fffbeb", border:"1px solid #fde68a"}} value={trialForm.adminNotes||""} onChange={e=>setTrialForm({...trialForm,adminNotes:e.target.value})} placeholder="e.g. 'Check NACSW site in August for premium' or 'Email Deb for entry link'" />
                 <div style={{ display:"flex", gap:8, marginTop:12 }}>
                   <button type="submit" style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)" }}>💾 Save for Everyone</button>
                   {editingTrialId&&<button type="button" onClick={()=>{setEditingTrialId(null);setAdminTab("list");}} style={btnStyle("#aaa")}>Cancel</button>}
@@ -437,16 +547,45 @@ export default function App() {
             )}
             {adminTab==="list"&&!editingTrialId&&(
               <div>
-                <div style={{ fontWeight:"bold", fontSize:14, marginBottom:10, color:"#5b21b6" }}>All Trials ({trials.length})</div>
-                {trials.map(t => (
-                  <div key={t.id} style={{ background:ORG_BG[t.org]||"#fff", borderLeft:`4px solid ${ORG_COLORS[t.org]}`, borderRadius:10, padding:"10px 12px", marginBottom:8, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                    <div style={{ flex:1, marginRight:8 }}>
-                      <div style={{ fontSize:13, fontWeight:"bold" }}>{t.name}</div>
-                      <div style={{ fontSize:11, color:"#888" }}>{t.date} · {t.location}</div>
-                    </div>
-                    <div style={{ display:"flex", gap:6, flexShrink:0 }}>
-                      <button onClick={()=>{setEditingTrialId(t.id);setTrialForm({...t});setAdminTab("add");window.scrollTo(0,0);}} style={{ ...btnStyle("#3a7bd5",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
-                      <button onClick={()=>deleteTrial(t.id)} style={{ ...btnStyle("#c0392b",true), padding:"3px 10px", fontSize:11 }}>Del</button>
+                {/* Filter bar */}
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                  <div style={{ fontWeight:"bold", fontSize:14, color:"#5b21b6" }}>All Trials ({trials.length})</div>
+                  <div style={{ display:"flex", gap:6 }}>
+                    <button onClick={()=>setAdminFilter("all")} style={{ background:adminFilter==="all"?"linear-gradient(135deg,#7c3aed,#06b6d4)":"#ede9fe", color:adminFilter==="all"?"#fff":"#7c3aed", border:"none", borderRadius:20, padding:"3px 12px", fontSize:12, cursor:"pointer" }}>All</button>
+                    <button onClick={()=>setAdminFilter("needsinfo")} style={{ background:adminFilter==="needsinfo"?"#f59e0b":"#fff8e1", color:adminFilter==="needsinfo"?"#fff":"#b45309", border:"1px solid #fcd34d", borderRadius:20, padding:"3px 12px", fontSize:12, cursor:"pointer", fontWeight:"bold" }}>
+                      ⚠️ Needs Info ({trials.filter(t=>t.needsInfo).length})
+                    </button>
+                  </div>
+                </div>
+
+                {(adminFilter==="needsinfo" ? trials.filter(t=>t.needsInfo) : trials).map(t => (
+                  <div key={t.id} style={{ background: t.needsInfo?"#fffbeb":ORG_BG[t.org]||"#fff", borderLeft:`4px solid ${t.needsInfo?"#f59e0b":ORG_COLORS[t.org]}`, borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                      <div style={{ flex:1, marginRight:8 }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                          {t.needsInfo&&<span style={{ fontSize:10, background:"#fef3c7", color:"#b45309", borderRadius:10, padding:"1px 6px", fontWeight:"bold" }}>⚠️ NEEDS INFO</span>}
+                          <div style={{ fontSize:13, fontWeight:"bold" }}>{t.name}</div>
+                        </div>
+                        <div style={{ fontSize:11, color:"#888", marginTop:2 }}>{t.date} · {t.location||"📍 Location TBD"}</div>
+                        {!t.entryLink&&<div style={{ fontSize:11, color:"#f59e0b", marginTop:2 }}>⚠️ No entry link yet</div>}
+                        {!t.entryDeadline&&<div style={{ fontSize:11, color:"#f59e0b", marginTop:1 }}>⚠️ No deadline set</div>}
+                        {t.adminNotes&&<div style={{ fontSize:11, color:"#b45309", background:"#fffbeb", borderRadius:6, padding:"3px 8px", marginTop:4 }}>🔒 {t.adminNotes}</div>}
+
+                        {/* Quick edit entry link inline */}
+                        {quickEditId===t.id ? (
+                          <div style={{ display:"flex", gap:6, marginTop:6 }}>
+                            <input style={{...inputStyle, fontSize:11, marginBottom:0, flex:1}} placeholder="Paste entry URL…" value={quickEditLink} onChange={e=>setQuickEditLink(e.target.value)} autoFocus/>
+                            <button onClick={async()=>{ await setDoc(doc(db,"trials",t.id),{...t,entryLink:quickEditLink},{merge:true}); setQuickEditId(null); setQuickEditLink(""); }} style={{ ...btnStyle("#27ae60"), padding:"4px 10px", fontSize:11 }}>Save</button>
+                            <button onClick={()=>{setQuickEditId(null);setQuickEditLink("");}} style={{ ...btnStyle("#aaa"), padding:"4px 8px", fontSize:11 }}>✕</button>
+                          </div>
+                        ) : (
+                          !t.entryLink && <button onClick={()=>{setQuickEditId(t.id);setQuickEditLink(t.entryLink||"");}} style={{ fontSize:11, color:"#7c3aed", background:"none", border:"none", cursor:"pointer", padding:"2px 0", marginTop:2, textDecoration:"underline" }}>+ Add entry link</button>
+                        )}
+                      </div>
+                      <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+                        <button onClick={()=>{setEditingTrialId(t.id);setTrialForm({...t,adminNotes:t.adminNotes||"",needsInfo:t.needsInfo||false,entryLink:t.entryLink||""});setAdminTab("add");window.scrollTo(0,0);}} style={{ ...btnStyle("#3a7bd5",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
+                        <button onClick={()=>deleteTrial(t.id)} style={{ ...btnStyle("#c0392b",true), padding:"3px 10px", fontSize:11 }}>Del</button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -507,7 +646,7 @@ export default function App() {
               </div>
             )}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginBottom:18 }}>
-              <StatCard label="Entered" value={Object.values(dogRegs).filter(Boolean).length} icon="📋"/>
+              <StatCard label="Entered" value={Object.values(dogRegs).filter(v=>v?.status==="entered").length} icon="📋"/>
               <StatCard label="Titles" value={titlesEarned.length} icon="🏆"/>
               <StatCard label="Upcoming" value={upcoming.length} icon="📅"/>
             </div>
@@ -518,7 +657,9 @@ export default function App() {
                 <div style={{ fontSize:13, color:"#666", marginTop:5, display:"flex", gap:10, flexWrap:"wrap" }}>
                   <span>📅 {upcoming[0].date}</span>
                   <span>📍 {upcoming[0].location}</span>
-                  <span style={{ color:dogRegs[upcoming[0].id]?"#27ae60":"#e07b39", fontWeight:"bold" }}>{dogRegs[upcoming[0].id]?"✓ Entered":"Not Entered"}</span>
+                  <span style={{ color: getStatus(upcoming[0].id)==="entered"?"#27ae60": getStatus(upcoming[0].id)==="waitlist"?"#f59e0b":"#e07b39", fontWeight:"bold" }}>
+                    {getStatus(upcoming[0].id)==="entered"?"✓ Entered": getStatus(upcoming[0].id)==="waitlist"?"⏳ Waitlist":"Not Entered"}
+                  </span>
                 </div>
               </div>
             )}
@@ -534,24 +675,72 @@ export default function App() {
         {/* TRIALS */}
         {tab==="Trials" && (
           <div>
-            <OrgFilter value={filterOrg} onChange={setFilterOrg}/>
+            <OrgFilter value={filterOrg} onChange={setFilterOrg} dogRegs={dogRegs}/>
             <div style={{ fontSize:11, color:"#bbb", margin:"6px 0 12px", textAlign:"right" }}>{trialsLoading?"⏳ Syncing…":`${filtered.length} trials · live calendar`}</div>
-            {filtered.map(t=>(
-              <div key={t.id} style={{ background:ORG_BG[t.org]||"#fff", borderRadius:12, padding:14, marginBottom:10, borderLeft:`5px solid ${ORG_COLORS[t.org]}`, boxShadow:"0 1px 6px rgba(0,0,0,0.05)" }}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
-                  <div style={{ flex:1, marginRight:8 }}>
-                    <div style={{ fontWeight:"bold", fontSize:14 }}>{t.name}</div>
-                    <div style={{ fontSize:11, color:"#888", marginTop:2 }}><OrgBadge org={t.org}/> · {t.level}</div>
-                    <div style={{ fontSize:12, color:"#555", marginTop:5 }}>📅 <b>{t.date}</b> · 📍 {t.location}</div>
-                    {t.entryDeadline&&<div style={{ fontSize:11, color:new Date(t.entryDeadline)<today?"#c0392b":"#e07b39", marginTop:3 }}>📌 Deadline: {t.entryDeadline} · {daysUntil(t.entryDeadline)}</div>}
-                    {t.notes&&<div style={{ fontSize:11, color:"#999", marginTop:4, fontStyle:"italic" }}>{t.notes}</div>}
+            {filtered.map(t => {
+              const status = getStatus(t.id);
+              const paid   = getPaid(t.id);
+              const statusColors = {
+                none:      { bg:"#f5f3ff", color:"#7c3aed", border:"#7c3aed", label:"Enter?" },
+                waitlist:  { bg:"#fff8e1", color:"#f59e0b", border:"#f59e0b", label:"⏳ Waitlist" },
+                entered:   { bg:"#e8f8ee", color:"#27ae60", border:"#27ae60", label:"✓ Entered" },
+              };
+              const sc = statusColors[status];
+              return (
+                <div key={t.id} style={{ background:ORG_BG[t.org]||"#fff", borderRadius:12, padding:14, marginBottom:10, borderLeft:`5px solid ${ORG_COLORS[t.org]}`, boxShadow:"0 1px 6px rgba(0,0,0,0.05)" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                    <div style={{ flex:1, marginRight:8 }}>
+                      <div style={{ fontWeight:"bold", fontSize:14 }}>{t.name}</div>
+                      <div style={{ fontSize:11, color:"#888", marginTop:2 }}><OrgBadge org={t.org}/> · {t.level}</div>
+                      {/* Tappable location → Google Maps */}
+                      <div style={{ fontSize:12, color:"#555", marginTop:5 }}>
+                        📅 <b>{t.date}</b> ·{" "}
+                        <span onClick={()=>openMaps(t.location)} style={{ color:"#7c3aed", cursor:"pointer", textDecoration:"underline" }}>
+                          📍 {t.location}
+                        </span>
+                      </div>
+                      {t.entryDeadline&&<div style={{ fontSize:11, color:new Date(t.entryDeadline)<today?"#c0392b":"#e07b39", marginTop:3 }}>📌 Deadline: {t.entryDeadline} · {daysUntil(t.entryDeadline)}</div>}
+                      {t.notes&&<div style={{ fontSize:11, color:"#999", marginTop:4, fontStyle:"italic" }}>{t.notes}</div>}
+                    </div>
+                    {/* Status button */}
+                    <div style={{ display:"flex", flexDirection:"column", gap:4, flexShrink:0, alignItems:"flex-end" }}>
+                      <div style={{ display:"flex", gap:4 }}>
+                        {["none","waitlist","entered"].map(s => (
+                          <button key={s} onClick={()=>setTrialStatus(t.id, s)} style={{
+                            background: status===s ? sc.bg : "#fff",
+                            color: status===s ? sc.color : "#bbb",
+                            border: `1px solid ${status===s ? sc.border : "#ddd"}`,
+                            borderRadius:20, padding:"3px 8px", fontSize:10, cursor:"pointer", whiteSpace:"nowrap", fontWeight: status===s ? "bold" : "normal"
+                          }}>
+                            {s==="none"?"Not In":s==="waitlist"?"Waitlist":"Entered"}
+                          </button>
+                        ))}
+                      </div>
+                      {/* Paid toggle — only show if waitlisted or entered */}
+                      {(status==="waitlist"||status==="entered") && (
+                        <button onClick={()=>togglePaid(t.id)} style={{
+                          background: paid ? "#e8f8ee" : "#ffeaea",
+                          color: paid ? "#27ae60" : "#c0392b",
+                          border: `1px solid ${paid?"#27ae60":"#ffaaaa"}`,
+                          borderRadius:20, padding:"3px 10px", fontSize:10, cursor:"pointer", fontWeight:"bold"
+                        }}>
+                          {paid ? "💳 Paid ✓" : "💳 Unpaid"}
+                        </button>
+                      )}
+                      {/* Entry link — only show if not entered */}
+                      {status==="none" && t.entryLink && (
+                        <button onClick={()=>window.open(t.entryLink,"_blank")} style={{
+                          background:"linear-gradient(135deg,#7c3aed,#06b6d4)", color:"#fff",
+                          border:"none", borderRadius:20, padding:"3px 10px", fontSize:10, cursor:"pointer"
+                        }}>
+                          Enter Now →
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <button onClick={()=>toggleReg(t.id)} style={{ background:dogRegs[t.id]?"#e8f8ee":"#f5f3ff", color:dogRegs[t.id]?"#27ae60":"#7c3aed", border:`1px solid ${dogRegs[t.id]?"#27ae60":"#7c3aed"}`, borderRadius:20, padding:"4px 12px", fontSize:12, cursor:"pointer", whiteSpace:"nowrap", flexShrink:0 }}>
-                    {dogRegs[t.id]?"✓ In":"Enter?"}
-                  </button>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -581,6 +770,28 @@ export default function App() {
                 <input style={inputStyle} value={resultForm.title} onChange={e=>setResultForm({...resultForm,title:e.target.value})} placeholder="e.g. NW1, SBN…" />
                 <label style={labelStyle}>Notes</label>
                 <textarea style={{...inputStyle,height:56}} value={resultForm.notes} onChange={e=>setResultForm({...resultForm,notes:e.target.value})} placeholder="How did it go?"/>
+                <label style={labelStyle}>📸 Ribbon Photo (optional)</label>
+                <div style={{ border:"1px dashed #ddd6fe", borderRadius:8, padding:10, background:"#faf5ff", marginBottom:4 }}>
+                  {resultPhotoFile ? (
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      <img src={URL.createObjectURL(resultPhotoFile)} alt="ribbon preview" style={{ width:60, height:60, objectFit:"cover", borderRadius:8 }}/>
+                      <div>
+                        <div style={{ fontSize:12, color:"#5b21b6", fontWeight:"bold" }}>{resultPhotoFile.name}</div>
+                        <button type="button" onClick={()=>setResultPhotoFile(null)} style={{ fontSize:11, color:"#c0392b", background:"none", border:"none", cursor:"pointer", padding:0 }}>Remove</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <label style={{ cursor:"pointer", display:"flex", alignItems:"center", gap:8, fontSize:13, color:"#7c3aed" }}>
+                      <span style={{ fontSize:20 }}>🎀</span> Tap to add ribbon photo
+                      <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>setResultPhotoFile(e.target.files[0]||null)}/>
+                    </label>
+                  )}
+                </div>
+                <label style={labelStyle}>🎥 Run Video Link (optional)</label>
+                <div style={{ background:"#f0fdf4", border:"1px dashed #86efac", borderRadius:8, padding:10, marginBottom:4 }}>
+                  <div style={{ fontSize:11, color:"#16a34a", marginBottom:6 }}>Paste a Google Drive, YouTube, or any video link. Upload your video there first, then paste the link here.</div>
+                  <input style={{...inputStyle, marginBottom:0}} value={resultForm.videoLink||""} onChange={e=>setResultForm({...resultForm,videoLink:e.target.value})} placeholder="https://drive.google.com/..." />
+                </div>
                 <div style={{ display:"flex", gap:8, marginTop:10 }}>
                   <button type="submit" style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)" }}>Save</button>
                   <button type="button" onClick={()=>setShowResultForm(false)} style={btnStyle("#aaa")}>Cancel</button>
@@ -597,6 +808,12 @@ export default function App() {
                   </div>
                 </div>
                 {r.notes&&<div style={{ fontSize:12, color:"#777", marginTop:6, fontStyle:"italic" }}>{r.notes}</div>}
+                {r.photoUrl&&<img src={r.photoUrl} alt="ribbon" style={{ width:"100%", maxHeight:200, objectFit:"cover", borderRadius:8, marginTop:8 }}/>}
+                {r.videoLink&&(
+                  <button onClick={()=>window.open(r.videoLink,"_blank")} style={{ display:"flex", alignItems:"center", gap:6, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"6px 12px", fontSize:12, cursor:"pointer", marginTop:8, fontWeight:"bold" }}>
+                    🎥 Watch Run Video →
+                  </button>
+                )}
               </div>
             ))}
             {myResults.length===0&&<div style={{ color:"#bbb", fontSize:13, textAlign:"center", marginTop:30 }}>No results logged yet!</div>}
@@ -719,12 +936,68 @@ export default function App() {
             <button onClick={addDog} style={{ ...btnStyle("#7c3aed",true), width:"100%", marginTop:14, padding:12, fontSize:14 }}>+ Add Another Dog</button>
           </div>
         )}
-      </div>
-    </div>
-  );
-}
+        {/* ACCOUNT */}
+        {tab==="Account" && (
+          <div>
+            <div style={{ fontWeight:"bold", fontSize:16, marginBottom:16, color:"#5b21b6" }}>👤 Account Settings</div>
 
-function OrgBadge({org,size=11}) {
+            {accountMsg && <div style={{ background:"#e8f8ee", color:"#27ae60", borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:13 }}>{accountMsg}</div>}
+            {accountError && <div style={{ background:"#ffeaea", color:"#c0392b", borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:13 }}>{accountError}</div>}
+
+            <div style={{ background:"#fff", borderRadius:12, padding:14, marginBottom:12, border:"1px solid #e9d5ff" }}>
+              <div style={{ fontSize:13, color:"#888", marginBottom:4 }}>Signed in as</div>
+              <div style={{ fontWeight:"bold", color:"#1e1b4b" }}>{user.displayName || "No name set"}</div>
+              <div style={{ fontSize:13, color:"#666" }}>{user.email}</div>
+            </div>
+
+            {/* Change Name */}
+            <form onSubmit={updateAccountName} style={formStyle}>
+              <div style={formTitle}>Change Display Name</div>
+              <label style={labelStyle}>New Name</label>
+              <input required style={inputStyle} placeholder="Your name" value={accountForm.name} onChange={e=>{ setAccountMsg(""); setAccountError(""); setAccountForm({...accountForm,name:e.target.value}); }} />
+              <button type="submit" style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", marginTop:10 }}>Update Name</button>
+            </form>
+
+            {/* Change Email */}
+            <form onSubmit={updateAccountEmail} style={formStyle}>
+              <div style={formTitle}>Change Email</div>
+              <label style={labelStyle}>New Email</label>
+              <input required type="email" style={inputStyle} placeholder="new@email.com" value={accountForm.email} onChange={e=>{ setAccountMsg(""); setAccountError(""); setAccountForm({...accountForm,email:e.target.value}); }} />
+              <label style={labelStyle}>Current Password (to confirm)</label>
+              <input required type="password" style={inputStyle} placeholder="••••••••" value={accountForm.currentPassword} onChange={e=>setAccountForm({...accountForm,currentPassword:e.target.value})} />
+              <button type="submit" style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", marginTop:10 }}>Update Email</button>
+            </form>
+
+            {/* Change Password */}
+            <form onSubmit={updateAccountPassword} style={formStyle}>
+              <div style={formTitle}>Change Password</div>
+              <label style={labelStyle}>Current Password</label>
+              <input required type="password" style={inputStyle} placeholder="••••••••" value={accountForm.currentPassword} onChange={e=>{ setAccountMsg(""); setAccountError(""); setAccountForm({...accountForm,currentPassword:e.target.value}); }} />
+              <label style={labelStyle}>New Password</label>
+              <input required type="password" style={inputStyle} placeholder="At least 6 characters" value={accountForm.newPassword} onChange={e=>setAccountForm({...accountForm,newPassword:e.target.value})} />
+              <button type="submit" style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", marginTop:10 }}>Update Password</button>
+            </form>
+
+            {/* Sign out */}
+            <button onClick={handleLogout} style={{ ...btnStyle("#aaa",true), width:"100%", padding:12, marginBottom:12 }}>Sign Out</button>
+
+            {/* Delete Account */}
+            {!showDeleteAccount ? (
+              <button onClick={()=>setShowDeleteAccount(true)} style={{ ...btnStyle("#c0392b",true), width:"100%", padding:12, fontSize:13 }}>Delete My Account</button>
+            ) : (
+              <form onSubmit={handleDeleteAccount} style={{ background:"#fff0f0", borderRadius:14, padding:18, border:"1px solid #ffcccc" }}>
+                <div style={{ fontWeight:"bold", fontSize:15, color:"#c0392b", marginBottom:8 }}>⚠️ Delete Account</div>
+                <p style={{ fontSize:13, color:"#666", margin:"0 0 12px" }}>This will permanently delete your account and all your dogs' data. This cannot be undone.</p>
+                <label style={labelStyle}>Enter your password to confirm</label>
+                <input required type="password" style={inputStyle} placeholder="••••••••" value={deletePassword} onChange={e=>{ setAccountError(""); setDeletePassword(e.target.value); }} />
+                <div style={{ display:"flex", gap:8, marginTop:12 }}>
+                  <button type="submit" style={btnStyle("#c0392b")}>Yes, Delete Everything</button>
+                  <button type="button" onClick={()=>{ setShowDeleteAccount(false); setDeletePassword(""); setAccountError(""); }} style={btnStyle("#aaa")}>Cancel</button>
+                </div>
+              </form>
+            )}
+          </div>
+        )}({org,size=11}) {
   return <span style={{ background:(ORG_COLORS[org]||"#999")+"22", color:ORG_COLORS[org]||"#999", borderRadius:20, padding:"2px 8px", fontSize:size, fontWeight:"bold", display:"inline-block" }}>{org}</span>;
 }
 function StatCard({label,value,icon,small}) {
@@ -738,20 +1011,36 @@ function StatCard({label,value,icon,small}) {
 }
 function ResultRow({r}) {
   return (
-    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 0", borderBottom:"1px solid #e9d5ff" }}>
-      <div><div style={{ fontSize:14, fontWeight:"bold" }}>{r.trial}</div><div style={{ fontSize:12, color:"#888" }}><OrgBadge org={r.org}/> · {r.date}</div></div>
-      <div style={{ textAlign:"right" }}>
-        <span style={{ background:r.result==="Pass"?"#e8f8ee":"#ffeaea", color:r.result==="Pass"?"#27ae60":"#c0392b", borderRadius:20, padding:"2px 10px", fontSize:11 }}>{r.result}</span>
-        {r.title&&<div style={{ fontSize:11, color:"#e07b39", fontWeight:"bold", marginTop:2 }}>🏆 {r.title}</div>}
+    <div style={{ padding:"10px 0", borderBottom:"1px solid #e9d5ff" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <div><div style={{ fontSize:14, fontWeight:"bold" }}>{r.trial}</div><div style={{ fontSize:12, color:"#888" }}><OrgBadge org={r.org}/> · {r.date}</div></div>
+        <div style={{ textAlign:"right" }}>
+          <span style={{ background:r.result==="Pass"?"#e8f8ee":"#ffeaea", color:r.result==="Pass"?"#27ae60":"#c0392b", borderRadius:20, padding:"2px 10px", fontSize:11 }}>{r.result}</span>
+          {r.title&&<div style={{ fontSize:11, color:"#e07b39", fontWeight:"bold", marginTop:2 }}>🏆 {r.title}</div>}
+        </div>
       </div>
+      {r.photoUrl&&<img src={r.photoUrl} alt="ribbon" style={{ width:"100%", maxHeight:160, objectFit:"cover", borderRadius:8, marginTop:8 }}/>}
+      {r.videoLink&&(
+        <button onClick={()=>window.open(r.videoLink,"_blank")} style={{ display:"flex", alignItems:"center", gap:6, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"5px 10px", fontSize:11, cursor:"pointer", marginTop:6, fontWeight:"bold" }}>
+          🎥 Watch Run →
+        </button>
+      )}
     </div>
   );
 }
-function OrgFilter({value,onChange}) {
+function OrgFilter({value, onChange, dogRegs={}}) {
+  const enteredCount = Object.values(dogRegs).filter(v => v?.status === "entered" || v?.status === "waitlist").length;
   return (
     <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-      {["All",...ORGS].map(o=>(
-        <button key={o} onClick={()=>onChange(o)} style={{ background:value===o?"linear-gradient(135deg,#7c3aed,#06b6d4)":"#ede9fe", color:value===o?"#fff":"#7c3aed", border:"none", borderRadius:20, padding:"4px 12px", fontSize:12, cursor:"pointer" }}>{o}</button>
+      {["All","Entered",...ORGS].map(o=>(
+        <button key={o} onClick={()=>onChange(o)} style={{
+          background: value===o ? "linear-gradient(135deg,#7c3aed,#06b6d4)" : o==="Entered" ? "#e8f8ee" : "#ede9fe",
+          color: value===o ? "#fff" : o==="Entered" ? "#27ae60" : "#7c3aed",
+          border: o==="Entered" && value!==o ? "1px solid #27ae60" : "none",
+          borderRadius:20, padding:"4px 12px", fontSize:12, cursor:"pointer", fontWeight: o==="Entered" ? "bold" : "normal"
+        }}>
+          {o==="Entered" ? `✓ Entered (${enteredCount})` : o}
+        </button>
       ))}
     </div>
   );
