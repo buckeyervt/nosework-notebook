@@ -599,17 +599,32 @@ export default function App() {
             {adminTab==="list"&&!editingTrialId&&(
               <div>
                 {/* Filter bar */}
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-                  <div style={{ fontWeight:"bold", fontSize:14, color:"#5b21b6" }}>All Trials ({trials.length})</div>
-                  <div style={{ display:"flex", gap:6 }}>
-                    <button onClick={()=>setAdminFilter("all")} style={{ background:adminFilter==="all"?"linear-gradient(135deg,#7c3aed,#06b6d4)":"#ede9fe", color:adminFilter==="all"?"#fff":"#7c3aed", border:"none", borderRadius:20, padding:"3px 12px", fontSize:12, cursor:"pointer" }}>All</button>
+                <div style={{ marginBottom:12 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                    <div style={{ fontWeight:"bold", fontSize:14, color:"#5b21b6" }}>All Trials ({trials.length})</div>
                     <button onClick={()=>setAdminFilter("needsinfo")} style={{ background:adminFilter==="needsinfo"?"#f59e0b":"#fff8e1", color:adminFilter==="needsinfo"?"#fff":"#b45309", border:"1px solid #fcd34d", borderRadius:20, padding:"3px 12px", fontSize:12, cursor:"pointer", fontWeight:"bold" }}>
                       ⚠️ Needs Info ({trials.filter(t=>t.needsInfo).length})
                     </button>
                   </div>
+                  {/* Org filters */}
+                  <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                    {["all","NACSW","UKC","AKC","USCSS/Other"].map(o=>(
+                      <button key={o} onClick={()=>setAdminFilter(o)} style={{
+                        background: adminFilter===o ? "linear-gradient(135deg,#7c3aed,#06b6d4)" : ORG_BG[o]||"#ede9fe",
+                        color: adminFilter===o ? "#fff" : ORG_COLORS[o]||"#7c3aed",
+                        border: "none", borderRadius:20, padding:"3px 12px", fontSize:12, cursor:"pointer", fontWeight: adminFilter===o?"bold":"normal"
+                      }}>
+                        {o==="all"?"All":o}
+                        {o!=="all"&&<span style={{ marginLeft:4, opacity:0.7 }}>({trials.filter(t=>t.org===o).length})</span>}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                {(adminFilter==="needsinfo" ? trials.filter(t=>t.needsInfo) : trials).map(t => (
+                {(adminFilter==="needsinfo" ? trials.filter(t=>t.needsInfo) 
+                  : adminFilter==="all" ? trials
+                  : trials.filter(t=>t.org===adminFilter)
+                ).map(t => (
                   <div key={t.id} style={{ background: t.needsInfo?"#fffbeb":ORG_BG[t.org]||"#fff", borderLeft:`4px solid ${t.needsInfo?"#f59e0b":ORG_COLORS[t.org]}`, borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
                       <div style={{ flex:1, marginRight:8 }}>
