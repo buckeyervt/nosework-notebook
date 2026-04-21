@@ -812,9 +812,10 @@ export default function App() {
                       {t.entryDeadline&&<div style={{ fontSize:11, color:entriesClosed?"#bbb":"#e07b39", marginTop:3 }}>
                         📌 {entriesClosed?"Entries closed":"Deadline:"} {t.entryDeadline}{!entriesClosed&&` · ${daysUntil(t.entryDeadline)}`}
                       </div>}
-                      {t.entryOpens&&!isPast&&<div style={{ fontSize:11, color: new Date(t.entryOpens)<=today?"#27ae60":"#3a7bd5", marginTop:2, fontWeight: new Date(t.entryOpens)<=today?"bold":"normal" }}>
+                      {t.entryOpens&&!isPast&&!entriesClosed&&<div style={{ fontSize:11, color: new Date(t.entryOpens)<=today?"#27ae60":"#3a7bd5", marginTop:2, fontWeight: new Date(t.entryOpens)<=today?"bold":"normal" }}>
                         {new Date(t.entryOpens)<=today ? "🟢 Entries Open!" : `🔔 Opens: ${t.entryOpens} · ${daysUntil(t.entryOpens)}`}
                       </div>}
+                      {entriesClosed&&!isPast&&<div style={{ fontSize:11, color:"#bbb", marginTop:2 }}>🔴 Entries Closed</div>}
                       {/* Enter Now — only show if entries are open and not yet closed */}
                       {status==="none" && t.entryLink && !entriesClosed && !isPast && (
                         <button onClick={()=>window.open(t.entryLink,"_blank")} style={{
