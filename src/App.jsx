@@ -71,6 +71,7 @@ export default function App() {
   const [resultForm, setResultForm]         = useState({ org:"NACSW", trial:"", date:"", level:"", result:"Pass", title:"", notes:"", videoLink:"" });
   const [showTitleForm, setShowTitleForm]   = useState(false);
   const [titleForm, setTitleForm]           = useState({ org:"NACSW", title:"", trial:"", date:"" });
+  const [trialView, setTrialView]           = useState("upcoming"); // "upcoming" | "past"
   const [resultPhotoFile, setResultPhotoFile] = useState(null);
   const [editingDogId, setEditingDogId]     = useState(null);
   const [dogForm, setDogForm]               = useState({});
@@ -397,9 +398,10 @@ export default function App() {
   const deadlineSoon = trials.filter(t => { const d=(new Date(t.entryDeadline)-today)/86400000; return d>=0&&d<=14&&getStatus(t.id)==="none"; });
   const opensSoon    = trials.filter(t => { const d=(new Date(t.entryOpens)-today)/86400000; return d>=0&&d<=7&&getStatus(t.id)==="none"; });
   const titlesEarned = myResults.filter(r=>r.title).map(r=>({org:r.org,title:r.title,date:r.date,trial:r.trial}));
-  const filtered = filterOrg === "All" ? trials
-    : filterOrg === "Entered" ? trials.filter(t => getStatus(t.id)==="entered" || getStatus(t.id)==="waitlist")
-    : trials.filter(t => t.org === filterOrg);
+  const trialsByView = trialView==="past" ? trials.filter(t=>new Date(t.date)<today) : trials.filter(t=>new Date(t.date)>=today);
+  const filtered = filterOrg === "All" ? trialsByView
+    : filterOrg === "Entered" ? trialsByView.filter(t => getStatus(t.id)==="entered" || getStatus(t.id)==="waitlist")
+    : trialsByView.filter(t => t.org === filterOrg);
   const daysUntil = d => { const n=Math.ceil((new Date(d)-today)/86400000); return n<0?"Passed":n===0?"Today!":n===1?"Tomorrow":`${n} days`; };
   const openMaps = (location) => {
     const encoded = encodeURIComponent(location);
@@ -773,22 +775,33 @@ export default function App() {
         {/* TRIALS */}
         {tab==="Trials" && (
           <div>
+            {/* Past / Upcoming toggle */}
+            <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+              <button onClick={()=>setTrialView("upcoming")} style={{ background:trialView==="upcoming"?"linear-gradient(135deg,#7c3aed,#06b6d4)":"#ede9fe", color:trialView==="upcoming"?"#fff":"#7c3aed", border:"none", borderRadius:20, padding:"5px 16px", fontSize:12, cursor:"pointer", fontWeight:"bold" }}>
+                📅 Upcoming ({trials.filter(t=>new Date(t.date)>=today).length})
+              </button>
+              <button onClick={()=>setTrialView("past")} style={{ background:trialView==="past"?"linear-gradient(135deg,#7c3aed,#06b6d4)":"#ede9fe", color:trialView==="past"?"#fff":"#7c3aed", border:"none", borderRadius:20, padding:"5px 16px", fontSize:12, cursor:"pointer", fontWeight:"bold" }}>
+                🏁 Past ({trials.filter(t=>new Date(t.date)<today).length})
+              </button>
+            </div>
             <OrgFilter value={filterOrg} onChange={setFilterOrg} dogRegs={dogRegs}/>
             <div style={{ fontSize:11, color:"#bbb", margin:"6px 0 12px", textAlign:"right" }}>{trialsLoading?"⏳ Syncing…":`${filtered.length} trials · live calendar`}</div>
             {filtered.map(t => {
               const status = getStatus(t.id);
               const paid   = getPaid(t.id);
+              const isPast = new Date(t.date) < today;
+              const entriesClosed = t.entryDeadline && new Date(t.entryDeadline) < today;
               const statusColors = {
-                none:      { bg:"#f5f3ff", color:"#7c3aed", border:"#7c3aed", label:"Enter?" },
-                waitlist:  { bg:"#fff8e1", color:"#f59e0b", border:"#f59e0b", label:"⏳ Waitlist" },
-                entered:   { bg:"#e8f8ee", color:"#27ae60", border:"#27ae60", label:"✓ Entered" },
+                none:      { bg:"#f5f3ff", color:"#7c3aed", border:"#7c3aed" },
+                waitlist:  { bg:"#fff8e1", color:"#f59e0b", border:"#f59e0b" },
+                entered:   { bg:"#e8f8ee", color:"#27ae60", border:"#27ae60" },
               };
               const sc = statusColors[status];
               return (
-                <div key={t.id} style={{ background:ORG_BG[t.org]||"#fff", borderRadius:12, padding:14, marginBottom:10, borderLeft:`5px solid ${ORG_COLORS[t.org]}`, boxShadow:"0 1px 6px rgba(0,0,0,0.05)" }}>
+                <div key={t.id} style={{ background: isPast?"#f8f8f8":ORG_BG[t.org]||"#fff", borderRadius:12, padding:14, marginBottom:10, borderLeft:`5px solid ${isPast?"#ccc":ORG_COLORS[t.org]}`, boxShadow:"0 1px 6px rgba(0,0,0,0.05)", opacity: isPast?0.85:1 }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
                     <div style={{ flex:1, marginRight:8 }}>
-                      <div style={{ fontWeight:"bold", fontSize:14 }}>{t.name}</div>
+                      <div style={{ fontWeight:"bold", fontSize:14, color: isPast?"#888":"#1e1b4b" }}>{t.name}</div>
                       <div style={{ fontSize:11, color:"#888", marginTop:2 }}><OrgBadge org={t.org}/> · {t.level}</div>
                       <div style={{ fontSize:12, color:"#555", marginTop:5 }}>
                         📅 <b>{t.date}</b> ·{" "}
@@ -796,12 +809,14 @@ export default function App() {
                           📍 {t.location}
                         </span>
                       </div>
-                      {t.entryDeadline&&<div style={{ fontSize:11, color:new Date(t.entryDeadline)<today?"#c0392b":"#e07b39", marginTop:3 }}>📌 Deadline: {t.entryDeadline} · {daysUntil(t.entryDeadline)}</div>}
-                      {t.entryOpens&&<div style={{ fontSize:11, color: new Date(t.entryOpens)<=today?"#27ae60":"#3a7bd5", marginTop:2, fontWeight: new Date(t.entryOpens)<=today?"bold":"normal" }}>
+                      {t.entryDeadline&&<div style={{ fontSize:11, color:entriesClosed?"#bbb":"#e07b39", marginTop:3 }}>
+                        📌 {entriesClosed?"Entries closed":"Deadline:"} {t.entryDeadline}{!entriesClosed&&` · ${daysUntil(t.entryDeadline)}`}
+                      </div>}
+                      {t.entryOpens&&!isPast&&<div style={{ fontSize:11, color: new Date(t.entryOpens)<=today?"#27ae60":"#3a7bd5", marginTop:2, fontWeight: new Date(t.entryOpens)<=today?"bold":"normal" }}>
                         {new Date(t.entryOpens)<=today ? "🟢 Entries Open!" : `🔔 Opens: ${t.entryOpens} · ${daysUntil(t.entryOpens)}`}
                       </div>}
-                      {/* Enter Now button — below deadline, full width feel */}
-                      {status==="none" && t.entryLink && (
+                      {/* Enter Now — only show if entries are open and not yet closed */}
+                      {status==="none" && t.entryLink && !entriesClosed && !isPast && (
                         <button onClick={()=>window.open(t.entryLink,"_blank")} style={{
                           background:"linear-gradient(135deg,#7c3aed,#06b6d4)", color:"#fff",
                           border:"none", borderRadius:20, padding:"5px 16px", fontSize:11,
@@ -812,36 +827,43 @@ export default function App() {
                       )}
                       {t.notes&&<div style={{ fontSize:11, color:"#999", marginTop:4, fontStyle:"italic" }}>{t.notes}</div>}
                     </div>
-                    {/* Status buttons — right side only */}
-                    <div style={{ display:"flex", flexDirection:"column", gap:4, flexShrink:0, alignItems:"flex-end" }}>
-                      <div style={{ display:"flex", gap:4 }}>
-                        {["none","waitlist","entered"].map(s => (
-                          <button key={s} onClick={()=>setTrialStatus(t.id, s)} style={{
-                            background: status===s ? sc.bg : "#fff",
-                            color: status===s ? sc.color : "#bbb",
-                            border: `1px solid ${status===s ? sc.border : "#ddd"}`,
-                            borderRadius:20, padding:"3px 8px", fontSize:10, cursor:"pointer", whiteSpace:"nowrap", fontWeight: status===s ? "bold" : "normal"
+                    {/* Status buttons — hide for past trials with no status */}
+                    {(!isPast || status!=="none") && (
+                      <div style={{ display:"flex", flexDirection:"column", gap:4, flexShrink:0, alignItems:"flex-end" }}>
+                        {!isPast && <div style={{ display:"flex", gap:4 }}>
+                          {["none","waitlist","entered"].map(s => (
+                            <button key={s} onClick={()=>setTrialStatus(t.id, s)} style={{
+                              background: status===s ? sc.bg : "#fff",
+                              color: status===s ? sc.color : "#bbb",
+                              border: `1px solid ${status===s ? sc.border : "#ddd"}`,
+                              borderRadius:20, padding:"3px 8px", fontSize:10, cursor:"pointer", whiteSpace:"nowrap", fontWeight: status===s ? "bold" : "normal"
+                            }}>
+                              {s==="none"?"Not In":s==="waitlist"?"Waitlist":"Entered"}
+                            </button>
+                          ))}
+                        </div>}
+                        {isPast && status!=="none" && (
+                          <span style={{ background:sc.bg, color:sc.color, border:`1px solid ${sc.border}`, borderRadius:20, padding:"3px 10px", fontSize:10, fontWeight:"bold" }}>
+                            {status==="entered"?"✓ Attended":status==="waitlist"?"⏳ Waitlisted":""}
+                          </span>
+                        )}
+                        {(status==="waitlist"||status==="entered") && (
+                          <button onClick={()=>togglePaid(t.id)} style={{
+                            background: paid ? "#e8f8ee" : "#ffeaea",
+                            color: paid ? "#27ae60" : "#c0392b",
+                            border: `1px solid ${paid?"#27ae60":"#ffaaaa"}`,
+                            borderRadius:20, padding:"3px 10px", fontSize:10, cursor:"pointer", fontWeight:"bold"
                           }}>
-                            {s==="none"?"Not In":s==="waitlist"?"Waitlist":"Entered"}
+                            {paid ? "💳 Paid ✓" : "💳 Unpaid"}
                           </button>
-                        ))}
+                        )}
                       </div>
-                      {/* Paid toggle — only show if waitlisted or entered */}
-                      {(status==="waitlist"||status==="entered") && (
-                        <button onClick={()=>togglePaid(t.id)} style={{
-                          background: paid ? "#e8f8ee" : "#ffeaea",
-                          color: paid ? "#27ae60" : "#c0392b",
-                          border: `1px solid ${paid?"#27ae60":"#ffaaaa"}`,
-                          borderRadius:20, padding:"3px 10px", fontSize:10, cursor:"pointer", fontWeight:"bold"
-                        }}>
-                          {paid ? "💳 Paid ✓" : "💳 Unpaid"}
-                        </button>
-                      )}
-                    </div>
+                    )}
                   </div>
                 </div>
               );
             })}
+            {filtered.length===0&&<div style={{ color:"#bbb", fontSize:13, textAlign:"center", marginTop:30 }}>No trials found! 🐾</div>}
           </div>
         )}
 
