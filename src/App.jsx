@@ -371,7 +371,7 @@ export default function App() {
   // ── Training ─────────────────────────────────────────────────
   const myTraining = activeDog ? (allTraining[activeDog.id] || []) : [];
   const blankTrainingForm = () => ({ date: new Date().toISOString().slice(0,10), time:"", type:"Class", location:"", notes:"", rating:"👍 Great", videoLink:"", runs:[] });
-  const blankRunForm = () => ({ odors:[], hideType:"Blind", elements:[], blindOutcome:"", notes:"" });
+  const blankRunForm = () => ({ odors:[], hideCount:"Single", hideType:"Blind", elements:[], blindOutcome:"", converging:false, notes:"" });
 
   function toggleMulti(arr, val) { return arr.includes(val) ? arr.filter(x=>x!==val) : [...arr, val]; }
 
@@ -1223,10 +1223,35 @@ export default function App() {
                       ))}
                     </div>
 
+                    {/* Converging scents — only when 2+ odors selected */}
+                    {runForm.odors.length >= 2 && (
+                      <div style={{ marginBottom:6 }}>
+                        <button type="button" onClick={()=>setRunForm({...runForm, converging:!runForm.converging})} style={{
+                          background: runForm.converging?"linear-gradient(135deg,#f59e0b,#ef4444)":"#fff",
+                          color: runForm.converging?"#fff":"#b45309",
+                          border:`1px solid ${runForm.converging?"transparent":"#fcd34d"}`,
+                          borderRadius:20, padding:"4px 14px", fontSize:11, cursor:"pointer", fontWeight:"bold"
+                        }}>🌀 Converging Scents {runForm.converging?"✓":""}</button>
+                      </div>
+                    )}
+
+                    {/* Hide count */}
+                    <label style={labelStyle}>Hide Count</label>
+                    <div style={{ display:"flex", gap:5, marginBottom:6 }}>
+                      {["Single","Multiple"].map(h=>(
+                        <button type="button" key={h} onClick={()=>setRunForm({...runForm, hideCount:h})} style={{
+                          background: runForm.hideCount===h?"linear-gradient(135deg,#7c3aed,#06b6d4)":"#fff",
+                          color: runForm.hideCount===h?"#fff":"#7c3aed",
+                          border:`1px solid ${runForm.hideCount===h?"transparent":"#ddd6fe"}`,
+                          borderRadius:20, padding:"4px 14px", fontSize:12, cursor:"pointer", fontWeight: runForm.hideCount===h?"bold":"normal"
+                        }}>{h}</button>
+                      ))}
+                    </div>
+
                     {/* Hide type */}
                     <label style={labelStyle}>Hide Type</label>
-                    <div style={{ display:"flex", gap:5, marginBottom:6 }}>
-                      {["Known","Blind","Both"].map(h=>(
+                    <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:6 }}>
+                      {["Known","Blind","Mixed"].map(h=>(
                         <button type="button" key={h} onClick={()=>setRunForm({...runForm, hideType:h, blindOutcome: h==="Known"?"":runForm.blindOutcome})} style={{
                           background: runForm.hideType===h?"linear-gradient(135deg,#7c3aed,#06b6d4)":"#fff",
                           color: runForm.hideType===h?"#fff":"#7c3aed",
@@ -1236,8 +1261,8 @@ export default function App() {
                       ))}
                     </div>
 
-                    {/* Blind outcome — only when Blind or Both */}
-                    {(runForm.hideType==="Blind"||runForm.hideType==="Both") && (
+                    {/* Blind outcome — only when Blind or Mixed */}
+                    {(runForm.hideType==="Blind"||runForm.hideType==="Mixed") && (
                       <>
                         <label style={labelStyle}>Blind Hide Outcome</label>
                         <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:6 }}>
@@ -1291,7 +1316,8 @@ export default function App() {
                       <div style={{ fontSize:12, fontWeight:"bold", color:"#5b21b6", marginBottom:3 }}>Run {idx+1}</div>
                       <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginBottom:3 }}>
                         {run.odors.map(o=><span key={o} style={{ background:"#ede9fe", color:"#7c3aed", borderRadius:20, padding:"1px 8px", fontSize:10, fontWeight:"bold" }}>{o}</span>)}
-                        <span style={{ background:"#f0fdf4", color:"#166534", borderRadius:20, padding:"1px 8px", fontSize:10 }}>{run.hideType}</span>
+                        {run.converging&&<span style={{ background:"#fef3c7", color:"#b45309", borderRadius:20, padding:"1px 8px", fontSize:10, fontWeight:"bold" }}>🌀 Converging</span>}
+                        <span style={{ background:"#f0fdf4", color:"#166534", borderRadius:20, padding:"1px 8px", fontSize:10 }}>{run.hideCount||"Single"} · {run.hideType}</span>
                         {run.elements.map(el=><span key={el} style={{ background:"#f0f9ff", color:"#0369a1", borderRadius:20, padding:"1px 8px", fontSize:10 }}>{el}</span>)}
                       </div>
                       {run.blindOutcome&&<div style={{ fontSize:11, color:"#555", fontStyle:"italic" }}>→ {run.blindOutcome}</div>}
@@ -1343,7 +1369,8 @@ export default function App() {
                               <div style={{ display:"flex", gap:4, flexWrap:"wrap", alignItems:"center" }}>
                                 <span style={{ fontSize:11, color:"#888", marginRight:2 }}>Run {i+1}:</span>
                                 {run.odors?.map(o=><span key={o} style={{ background:"#ede9fe", color:"#7c3aed", borderRadius:20, padding:"1px 7px", fontSize:10, fontWeight:"bold" }}>{o}</span>)}
-                                <span style={{ background:"#f0fdf4", color:"#166534", borderRadius:20, padding:"1px 7px", fontSize:10 }}>{run.hideType}</span>
+                                {run.converging&&<span style={{ background:"#fef3c7", color:"#b45309", borderRadius:20, padding:"1px 7px", fontSize:10, fontWeight:"bold" }}>🌀 Converging</span>}
+                                <span style={{ background:"#f0fdf4", color:"#166534", borderRadius:20, padding:"1px 7px", fontSize:10 }}>{run.hideCount||"Single"} · {run.hideType}</span>
                                 {run.elements?.map(el=><span key={el} style={{ background:"#f0f9ff", color:"#0369a1", borderRadius:20, padding:"1px 7px", fontSize:10 }}>{el}</span>)}
                               </div>
                               {run.blindOutcome&&<div style={{ fontSize:10, color:"#666", marginTop:2, fontStyle:"italic" }}>→ {run.blindOutcome}</div>}
