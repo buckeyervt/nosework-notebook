@@ -75,10 +75,13 @@ export default function App() {
   const [resultPhotoFile, setResultPhotoFile] = useState(null);
 
   // ── Training state ───────────────────────────────────────────
-  const [allTraining, setAllTraining]       = useState({});
+  const [allTraining, setAllTraining]           = useState({});
   const [showTrainingForm, setShowTrainingForm] = useState(false);
-  const [trainingForm, setTrainingForm]     = useState({ date: new Date().toISOString().slice(0,10), time:"", type:"Class", location:"", skills:"", notes:"", rating:"👍 Great", videoLink:"" });
+  const [trainingForm, setTrainingForm]         = useState({ date: new Date().toISOString().slice(0,10), time:"", type:"Class", location:"", notes:"", rating:"👍 Great", videoLink:"", runs:[] });
   const [editingTrainingId, setEditingTrainingId] = useState(null);
+  const [showRunForm, setShowRunForm]           = useState(false);
+  const [runForm, setRunForm]                   = useState({ odors:[], hideType:"Blind", elements:[], blindOutcome:"" });
+  const [editingRunIdx, setEditingRunIdx]       = useState(null);
   const [editingDogId, setEditingDogId]     = useState(null);
   const [dogForm, setDogForm]               = useState({});
   const [deleteConfirm, setDeleteConfirm]   = useState(null);
@@ -367,19 +370,39 @@ export default function App() {
 
   // ── Training ─────────────────────────────────────────────────
   const myTraining = activeDog ? (allTraining[activeDog.id] || []) : [];
-  const blankTrainingForm = () => ({ date: new Date().toISOString().slice(0,10), time:"", type:"Class", location:"", skills:"", notes:"", rating:"👍 Great", videoLink:"" });
+  const blankTrainingForm = () => ({ date: new Date().toISOString().slice(0,10), time:"", type:"Class", location:"", notes:"", rating:"👍 Great", videoLink:"", runs:[] });
+  const blankRunForm = () => ({ odors:[], hideType:"Blind", elements:[], blindOutcome:"", notes:"" });
+
+  function toggleMulti(arr, val) { return arr.includes(val) ? arr.filter(x=>x!==val) : [...arr, val]; }
+
+  function saveRun(e) {
+    e.preventDefault();
+    if (!runForm.odors.length) return alert("Please select at least one odor.");
+    if (!runForm.elements.length) return alert("Please select at least one search element.");
+    if (editingRunIdx !== null) {
+      const runs = trainingForm.runs.map((r,i) => i===editingRunIdx ? {...runForm} : r);
+      setTrainingForm({...trainingForm, runs});
+      setEditingRunIdx(null);
+    } else {
+      setTrainingForm({...trainingForm, runs:[...trainingForm.runs, {...runForm}]});
+    }
+    setRunForm(blankRunForm());
+    setShowRunForm(false);
+  }
+
+  function deleteRun(idx) {
+    setTrainingForm({...trainingForm, runs: trainingForm.runs.filter((_,i)=>i!==idx)});
+  }
 
   async function addTrainingEntry(e) {
     e.preventDefault();
     if (!activeDog) return;
     if (editingTrainingId) {
-      // Edit existing
       const newTraining = { ...allTraining, [activeDog.id]: (allTraining[activeDog.id]||[]).map(t => t.id===editingTrainingId ? {...trainingForm, id:editingTrainingId} : t) };
       setAllTraining(newTraining);
       setEditingTrainingId(null);
       await saveUserData({ training: newTraining });
     } else {
-      // New entry
       const entry = { ...trainingForm, id: Date.now().toString() };
       const newTraining = { ...allTraining, [activeDog.id]: [entry, ...(allTraining[activeDog.id]||[])] };
       setAllTraining(newTraining);
@@ -387,6 +410,9 @@ export default function App() {
     }
     setShowTrainingForm(false);
     setTrainingForm(blankTrainingForm());
+    setRunForm(blankRunForm());
+    setShowRunForm(false);
+    setEditingRunIdx(null);
   }
 
   async function deleteTrainingEntry(entryId) {
@@ -397,9 +423,11 @@ export default function App() {
   }
 
   function startEditTraining(entry) {
-    setTrainingForm({ ...entry });
+    setTrainingForm({ ...entry, runs: entry.runs||[] });
     setEditingTrainingId(entry.id);
     setShowTrainingForm(true);
+    setShowRunForm(false);
+    setEditingRunIdx(null);
     window.scrollTo(0, 0);
   }
   async function handlePhoto(dogId, file) {
@@ -1130,11 +1158,9 @@ export default function App() {
           <div>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
               <div style={{ fontWeight:"bold", fontSize:16, color:"#5b21b6" }}>🎯 Training Log · {activeDog?.callName}</div>
-              <div style={{ display:"flex", gap:6 }}>
-                <button onClick={()=>{ setTrainingForm(blankTrainingForm()); setEditingTrainingId(null); setShowTrainingForm(!showTrainingForm); }} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", fontSize:12, padding:"6px 14px" }}>
-                  {showTrainingForm && !editingTrainingId ? "Cancel" : "+ Log Session"}
-                </button>
-              </div>
+              <button onClick={()=>{ setTrainingForm(blankTrainingForm()); setEditingTrainingId(null); setShowTrainingForm(!showTrainingForm); setShowRunForm(false); }} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", fontSize:12, padding:"6px 14px" }}>
+                {showTrainingForm && !editingTrainingId ? "Cancel" : "+ Log Session"}
+              </button>
             </div>
 
             {showTrainingForm && (
@@ -1143,55 +1169,144 @@ export default function App() {
 
                 {/* Date + Time + Type */}
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
-                  <div>
-                    <label style={labelStyle}>Date</label>
-                    <input type="date" style={inputStyle} value={trainingForm.date} onChange={e=>setTrainingForm({...trainingForm,date:e.target.value})}/>
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Time</label>
-                    <input type="time" style={inputStyle} value={trainingForm.time||""} onChange={e=>setTrainingForm({...trainingForm,time:e.target.value})} placeholder="Optional"/>
-                  </div>
+                  <div><label style={labelStyle}>Date</label><input type="date" style={inputStyle} value={trainingForm.date} onChange={e=>setTrainingForm({...trainingForm,date:e.target.value})}/></div>
+                  <div><label style={labelStyle}>Time</label><input type="time" style={inputStyle} value={trainingForm.time||""} onChange={e=>setTrainingForm({...trainingForm,time:e.target.value})}/></div>
                   <div>
                     <label style={labelStyle}>Session Type</label>
                     <select style={inputStyle} value={trainingForm.type} onChange={e=>setTrainingForm({...trainingForm,type:e.target.value})}>
-                      <option>Class</option>
-                      <option>Private Lesson</option>
-                      <option>Home Practice</option>
-                      <option>Fun Match</option>
-                      <option>Other</option>
+                      <option>Class</option><option>Private Lesson</option><option>Home Practice</option><option>Fun Match</option><option>Other</option>
                     </select>
                   </div>
                 </div>
 
-                {/* Quick save prompt */}
                 <div style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:8, padding:"8px 12px", margin:"10px 0", fontSize:12, color:"#0369a1" }}>
-                  💡 Just saw it on WhatsApp? Fill in date, time and type then hit Save — you can add details later by tapping Edit!
+                  💡 Just saw it on WhatsApp? Fill in date, time and type then hit Save — add runs and details later by tapping Edit!
                 </div>
 
                 <label style={labelStyle}>Location</label>
                 <input style={inputStyle} value={trainingForm.location||""} onChange={e=>setTrainingForm({...trainingForm,location:e.target.value})} placeholder="Training center, home, park…"/>
-                <label style={labelStyle}>Skills / Hide Types Worked</label>
-                <input style={inputStyle} value={trainingForm.skills||""} onChange={e=>setTrainingForm({...trainingForm,skills:e.target.value})} placeholder="e.g. NW3 interiors, vehicle combos, inaccessibles"/>
-                <label style={labelStyle}>Notes</label>
-                <textarea style={{...inputStyle, height:72}} value={trainingForm.notes||""} onChange={e=>setTrainingForm({...trainingForm,notes:e.target.value})} placeholder="What went well, what to work on, patterns you noticed…"/>
+                <label style={labelStyle}>Session Notes</label>
+                <textarea style={{...inputStyle, height:60}} value={trainingForm.notes||""} onChange={e=>setTrainingForm({...trainingForm,notes:e.target.value})} placeholder="Overall session notes, patterns noticed…"/>
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 2fr", gap:10 }}>
                   <div>
                     <label style={labelStyle}>Overall Feel</label>
                     <select style={inputStyle} value={trainingForm.rating||"👍 Great"} onChange={e=>setTrainingForm({...trainingForm,rating:e.target.value})}>
-                      <option>👍 Great</option>
-                      <option>👌 Good</option>
-                      <option>🤔 Mixed</option>
-                      <option>😬 Rough</option>
+                      <option>👍 Great</option><option>👌 Good</option><option>🤔 Mixed</option><option>😬 Rough</option>
                     </select>
                   </div>
-                  <div>
-                    <label style={labelStyle}>Video Link (optional)</label>
-                    <input style={inputStyle} value={trainingForm.videoLink||""} onChange={e=>setTrainingForm({...trainingForm,videoLink:e.target.value})} placeholder="Google Drive or YouTube URL"/>
-                  </div>
+                  <div><label style={labelStyle}>Video Link (optional)</label><input style={inputStyle} value={trainingForm.videoLink||""} onChange={e=>setTrainingForm({...trainingForm,videoLink:e.target.value})} placeholder="Google Drive or YouTube URL"/></div>
                 </div>
-                <div style={{ display:"flex", gap:8, marginTop:12 }}>
+
+                {/* ── RUNS ── */}
+                <div style={{ margin:"14px 0 8px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div style={{ fontWeight:"bold", fontSize:13, color:"#5b21b6" }}>Runs ({trainingForm.runs?.length||0})</div>
+                  <button type="button" onClick={()=>{ setRunForm(blankRunForm()); setEditingRunIdx(null); setShowRunForm(!showRunForm); }} style={{ ...btnStyle("#06b6d4",true), padding:"3px 12px", fontSize:11 }}>
+                    {showRunForm && editingRunIdx===null ? "Cancel" : "+ Add Run"}
+                  </button>
+                </div>
+
+                {/* Run form */}
+                {showRunForm && (
+                  <div style={{ background:"#f0fdff", border:"1px solid #a5f3fc", borderRadius:10, padding:12, marginBottom:10 }}>
+                    <div style={{ fontWeight:"bold", fontSize:12, color:"#0e7490", marginBottom:8 }}>{editingRunIdx!==null ? "Edit Run" : `Run ${(trainingForm.runs?.length||0)+1}`}</div>
+
+                    {/* Odors — multi select */}
+                    <label style={labelStyle}>Odor(s) — tap to select multiple</label>
+                    <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:6 }}>
+                      {["Birch","Anise","Clove","Myrrh","Cypress","Vetiver"].map(o=>(
+                        <button type="button" key={o} onClick={()=>setRunForm({...runForm, odors:toggleMulti(runForm.odors,o)})} style={{
+                          background: runForm.odors.includes(o)?"linear-gradient(135deg,#7c3aed,#06b6d4)":"#fff",
+                          color: runForm.odors.includes(o)?"#fff":"#7c3aed",
+                          border:`1px solid ${runForm.odors.includes(o)?"transparent":"#ddd6fe"}`,
+                          borderRadius:20, padding:"4px 12px", fontSize:12, cursor:"pointer", fontWeight: runForm.odors.includes(o)?"bold":"normal"
+                        }}>{o}</button>
+                      ))}
+                    </div>
+
+                    {/* Hide type */}
+                    <label style={labelStyle}>Hide Type</label>
+                    <div style={{ display:"flex", gap:5, marginBottom:6 }}>
+                      {["Known","Blind","Both"].map(h=>(
+                        <button type="button" key={h} onClick={()=>setRunForm({...runForm, hideType:h, blindOutcome: h==="Known"?"":runForm.blindOutcome})} style={{
+                          background: runForm.hideType===h?"linear-gradient(135deg,#7c3aed,#06b6d4)":"#fff",
+                          color: runForm.hideType===h?"#fff":"#7c3aed",
+                          border:`1px solid ${runForm.hideType===h?"transparent":"#ddd6fe"}`,
+                          borderRadius:20, padding:"4px 14px", fontSize:12, cursor:"pointer", fontWeight: runForm.hideType===h?"bold":"normal"
+                        }}>{h}</button>
+                      ))}
+                    </div>
+
+                    {/* Blind outcome — only when Blind or Both */}
+                    {(runForm.hideType==="Blind"||runForm.hideType==="Both") && (
+                      <>
+                        <label style={labelStyle}>Blind Hide Outcome</label>
+                        <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:6 }}>
+                          {[
+                            {val:"Found · Full confidence", color:"#16a34a", bg:"#e8f8ee", border:"#86efac"},
+                            {val:"Found · Unsure but called it", color:"#1d4ed8", bg:"#eff6ff", border:"#93c5fd"},
+                            {val:"Dog showed · I held back", color:"#b45309", bg:"#fffbeb", border:"#fcd34d"},
+                            {val:"False Alert", color:"#991b1b", bg:"#fee2e2", border:"#fca5a5"},
+                          ].map(({val,color,bg,border})=>(
+                            <button type="button" key={val} onClick={()=>setRunForm({...runForm,blindOutcome:val})} style={{
+                              background: runForm.blindOutcome===val ? bg : "#fff",
+                              color: runForm.blindOutcome===val ? color : "#888",
+                              border: `1px solid ${runForm.blindOutcome===val ? border : "#eee"}`,
+                              borderRadius:20, padding:"4px 12px", fontSize:11, cursor:"pointer",
+                              fontWeight: runForm.blindOutcome===val?"bold":"normal"
+                            }}>{val}</button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+
+                    {/* Search elements — multi select */}
+                    <label style={labelStyle}>Search Element(s) — tap to select multiple</label>
+                    <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:8 }}>
+                      {["Interior","Exterior","Vehicle","Buried","Water"].map(el=>(
+                        <button type="button" key={el} onClick={()=>setRunForm({...runForm, elements:toggleMulti(runForm.elements,el)})} style={{
+                          background: runForm.elements.includes(el)?"linear-gradient(135deg,#7c3aed,#06b6d4)":"#fff",
+                          color: runForm.elements.includes(el)?"#fff":"#7c3aed",
+                          border:`1px solid ${runForm.elements.includes(el)?"transparent":"#ddd6fe"}`,
+                          borderRadius:20, padding:"4px 12px", fontSize:12, cursor:"pointer", fontWeight: runForm.elements.includes(el)?"bold":"normal"
+                        }}>{el}</button>
+                      ))}
+                    </div>
+
+                    <label style={labelStyle}>Run Notes (optional)</label>
+                    <input style={inputStyle} value={runForm.notes||""} onChange={e=>setRunForm({...runForm,notes:e.target.value})} placeholder="What happened on this run…"/>
+
+                    <div style={{ display:"flex", gap:6, marginTop:8 }}>
+                      <button type="button" onClick={saveRun} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", fontSize:12, padding:"5px 14px" }}>
+                        {editingRunIdx!==null?"Save Run":"Add Run"}
+                      </button>
+                      <button type="button" onClick={()=>{ setShowRunForm(false); setEditingRunIdx(null); setRunForm(blankRunForm()); }} style={{ ...btnStyle("#aaa"), fontSize:12, padding:"5px 14px" }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Runs list */}
+                {(trainingForm.runs||[]).map((run,idx)=>(
+                  <div key={idx} style={{ background:"#faf5ff", borderRadius:8, padding:"8px 12px", marginBottom:6, border:"1px solid #e9d5ff", display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:12, fontWeight:"bold", color:"#5b21b6", marginBottom:3 }}>Run {idx+1}</div>
+                      <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginBottom:3 }}>
+                        {run.odors.map(o=><span key={o} style={{ background:"#ede9fe", color:"#7c3aed", borderRadius:20, padding:"1px 8px", fontSize:10, fontWeight:"bold" }}>{o}</span>)}
+                        <span style={{ background:"#f0fdf4", color:"#166534", borderRadius:20, padding:"1px 8px", fontSize:10 }}>{run.hideType}</span>
+                        {run.elements.map(el=><span key={el} style={{ background:"#f0f9ff", color:"#0369a1", borderRadius:20, padding:"1px 8px", fontSize:10 }}>{el}</span>)}
+                      </div>
+                      {run.blindOutcome&&<div style={{ fontSize:11, color:"#555", fontStyle:"italic" }}>→ {run.blindOutcome}</div>}
+                      {run.notes&&<div style={{ fontSize:11, color:"#888", marginTop:2 }}>{run.notes}</div>}
+                    </div>
+                    <div style={{ display:"flex", gap:4, flexShrink:0, marginLeft:6 }}>
+                      <button type="button" onClick={()=>{ setRunForm({...run}); setEditingRunIdx(idx); setShowRunForm(true); }} style={{ ...btnStyle("#7c3aed",true), padding:"2px 8px", fontSize:10 }}>Edit</button>
+                      <button type="button" onClick={()=>deleteRun(idx)} style={{ ...btnStyle("#c0392b",true), padding:"2px 8px", fontSize:10 }}>Del</button>
+                    </div>
+                  </div>
+                ))}
+
+                <div style={{ display:"flex", gap:8, marginTop:14 }}>
                   <button type="submit" style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)" }}>{editingTrainingId ? "Save Changes" : "Save Session"}</button>
-                  <button type="button" onClick={()=>{ setShowTrainingForm(false); setEditingTrainingId(null); setTrainingForm(blankTrainingForm()); }} style={btnStyle("#aaa")}>Cancel</button>
+                  <button type="button" onClick={()=>{ setShowTrainingForm(false); setEditingTrainingId(null); setTrainingForm(blankTrainingForm()); setShowRunForm(false); }} style={btnStyle("#aaa")}>Cancel</button>
                 </div>
               </form>
             )}
@@ -1200,7 +1315,7 @@ export default function App() {
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginBottom:16 }}>
               <StatCard label="Total Sessions" value={myTraining.length} icon="🎯"/>
               <StatCard label="This Month" value={myTraining.filter(t=>t.date?.slice(0,7)===new Date().toISOString().slice(0,7)).length} icon="📅"/>
-              <StatCard label="Classes" value={myTraining.filter(t=>t.type==="Class").length} icon="🏫"/>
+              <StatCard label="Total Runs" value={myTraining.reduce((a,t)=>a+(t.runs?.length||0),0)} icon="🏃"/>
             </div>
 
             {myTraining.length===0
@@ -1211,18 +1326,35 @@ export default function App() {
                     <div style={{ flex:1, marginRight:8 }}>
                       <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
                         <div style={{ fontWeight:"bold", fontSize:14 }}>
-                          {entry.date}{entry.time && <span style={{ color:"#888", fontWeight:"normal", fontSize:12 }}> · {entry.time}</span>}
+                          {entry.date}{entry.time&&<span style={{ color:"#888", fontWeight:"normal", fontSize:12 }}> · {entry.time}</span>}
                         </div>
                         <span style={{ background:"#ede9fe", color:"#7c3aed", borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:"bold" }}>{entry.type}</span>
-                        <span style={{ fontSize:16 }}>{entry.rating?.split(" ")[0]}</span>
+                        <span style={{ fontSize:15 }}>{entry.rating?.split(" ")[0]}</span>
                       </div>
-                      {entry.location&&<div style={{ fontSize:12, color:"#666", marginTop:4 }}>📍 {entry.location}</div>}
-                      {entry.skills&&<div style={{ fontSize:12, color:"#5b21b6", marginTop:4 }}>🎯 {entry.skills}</div>}
-                      {entry.notes&&<div style={{ fontSize:12, color:"#555", marginTop:6, fontStyle:"italic", lineHeight:1.5 }}>{entry.notes}</div>}
-                      {/* Show "needs details" prompt if only basic info filled in */}
-                      {!entry.location && !entry.skills && !entry.notes && (
-                        <div style={{ fontSize:11, color:"#f59e0b", marginTop:4 }}>📝 Tap Edit to add session details</div>
+                      {entry.location&&<div style={{ fontSize:12, color:"#666", marginTop:3 }}>📍 {entry.location}</div>}
+                      {entry.notes&&<div style={{ fontSize:12, color:"#555", marginTop:4, fontStyle:"italic" }}>{entry.notes}</div>}
+
+                      {/* Runs summary */}
+                      {(entry.runs?.length>0) ? (
+                        <div style={{ marginTop:8 }}>
+                          <div style={{ fontSize:11, color:"#5b21b6", fontWeight:"bold", marginBottom:4 }}>{entry.runs.length} Run{entry.runs.length>1?"s":""}</div>
+                          {entry.runs.map((run,i)=>(
+                            <div key={i} style={{ background:"#faf5ff", borderRadius:8, padding:"6px 10px", marginBottom:4, border:"1px solid #e9d5ff" }}>
+                              <div style={{ display:"flex", gap:4, flexWrap:"wrap", alignItems:"center" }}>
+                                <span style={{ fontSize:11, color:"#888", marginRight:2 }}>Run {i+1}:</span>
+                                {run.odors?.map(o=><span key={o} style={{ background:"#ede9fe", color:"#7c3aed", borderRadius:20, padding:"1px 7px", fontSize:10, fontWeight:"bold" }}>{o}</span>)}
+                                <span style={{ background:"#f0fdf4", color:"#166534", borderRadius:20, padding:"1px 7px", fontSize:10 }}>{run.hideType}</span>
+                                {run.elements?.map(el=><span key={el} style={{ background:"#f0f9ff", color:"#0369a1", borderRadius:20, padding:"1px 7px", fontSize:10 }}>{el}</span>)}
+                              </div>
+                              {run.blindOutcome&&<div style={{ fontSize:10, color:"#666", marginTop:2, fontStyle:"italic" }}>→ {run.blindOutcome}</div>}
+                              {run.notes&&<div style={{ fontSize:10, color:"#888", marginTop:1 }}>{run.notes}</div>}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize:11, color:"#f59e0b", marginTop:4 }}>📝 Tap Edit to add runs</div>
                       )}
+
                       {entry.videoLink&&(
                         <button onClick={()=>window.open(entry.videoLink,"_blank")} style={{ display:"flex", alignItems:"center", gap:6, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"5px 10px", fontSize:11, cursor:"pointer", marginTop:6, fontWeight:"bold" }}>
                           🎥 Watch Training Video →
