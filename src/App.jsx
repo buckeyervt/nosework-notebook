@@ -77,7 +77,8 @@ export default function App() {
   // ── Training state ───────────────────────────────────────────
   const [allTraining, setAllTraining]       = useState({});
   const [showTrainingForm, setShowTrainingForm] = useState(false);
-  const [trainingForm, setTrainingForm]     = useState({ date: new Date().toISOString().slice(0,10), type:"Class", location:"", skills:"", notes:"", rating:"👍", videoLink:"" });
+  const [trainingForm, setTrainingForm]     = useState({ date: new Date().toISOString().slice(0,10), time:"", type:"Class", location:"", skills:"", notes:"", rating:"👍 Great", videoLink:"" });
+  const [editingTrainingId, setEditingTrainingId] = useState(null);
   const [editingDogId, setEditingDogId]     = useState(null);
   const [dogForm, setDogForm]               = useState({});
   const [deleteConfirm, setDeleteConfirm]   = useState(null);
@@ -366,16 +367,26 @@ export default function App() {
 
   // ── Training ─────────────────────────────────────────────────
   const myTraining = activeDog ? (allTraining[activeDog.id] || []) : [];
+  const blankTrainingForm = () => ({ date: new Date().toISOString().slice(0,10), time:"", type:"Class", location:"", skills:"", notes:"", rating:"👍 Great", videoLink:"" });
 
   async function addTrainingEntry(e) {
     e.preventDefault();
     if (!activeDog) return;
-    const entry = { ...trainingForm, id: Date.now().toString() };
-    const newTraining = { ...allTraining, [activeDog.id]: [entry, ...(allTraining[activeDog.id]||[])] };
-    setAllTraining(newTraining);
+    if (editingTrainingId) {
+      // Edit existing
+      const newTraining = { ...allTraining, [activeDog.id]: (allTraining[activeDog.id]||[]).map(t => t.id===editingTrainingId ? {...trainingForm, id:editingTrainingId} : t) };
+      setAllTraining(newTraining);
+      setEditingTrainingId(null);
+      await saveUserData({ training: newTraining });
+    } else {
+      // New entry
+      const entry = { ...trainingForm, id: Date.now().toString() };
+      const newTraining = { ...allTraining, [activeDog.id]: [entry, ...(allTraining[activeDog.id]||[])] };
+      setAllTraining(newTraining);
+      await saveUserData({ training: newTraining });
+    }
     setShowTrainingForm(false);
-    setTrainingForm({ date: new Date().toISOString().slice(0,10), type:"Class", location:"", skills:"", notes:"", rating:"👍", videoLink:"" });
-    await saveUserData({ training: newTraining });
+    setTrainingForm(blankTrainingForm());
   }
 
   async function deleteTrainingEntry(entryId) {
@@ -383,6 +394,13 @@ export default function App() {
     const newTraining = { ...allTraining, [activeDog.id]: (allTraining[activeDog.id]||[]).filter(e=>e.id!==entryId) };
     setAllTraining(newTraining);
     await saveUserData({ training: newTraining });
+  }
+
+  function startEditTraining(entry) {
+    setTrainingForm({ ...entry });
+    setEditingTrainingId(entry.id);
+    setShowTrainingForm(true);
+    window.scrollTo(0, 0);
   }
   async function handlePhoto(dogId, file) {
     if (!file || !user) return;
@@ -1112,16 +1130,26 @@ export default function App() {
           <div>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
               <div style={{ fontWeight:"bold", fontSize:16, color:"#5b21b6" }}>🎯 Training Log · {activeDog?.callName}</div>
-              <button onClick={()=>setShowTrainingForm(!showTrainingForm)} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", fontSize:12, padding:"6px 14px" }}>+ Log Session</button>
+              <div style={{ display:"flex", gap:6 }}>
+                <button onClick={()=>{ setTrainingForm(blankTrainingForm()); setEditingTrainingId(null); setShowTrainingForm(!showTrainingForm); }} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", fontSize:12, padding:"6px 14px" }}>
+                  {showTrainingForm && !editingTrainingId ? "Cancel" : "+ Log Session"}
+                </button>
+              </div>
             </div>
 
             {showTrainingForm && (
               <form onSubmit={addTrainingEntry} style={formStyle}>
-                <div style={formTitle}>New Training Session</div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                <div style={formTitle}>{editingTrainingId ? "✏️ Edit Session" : "New Training Session"}</div>
+
+                {/* Date + Time + Type */}
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
                   <div>
                     <label style={labelStyle}>Date</label>
                     <input type="date" style={inputStyle} value={trainingForm.date} onChange={e=>setTrainingForm({...trainingForm,date:e.target.value})}/>
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Time</label>
+                    <input type="time" style={inputStyle} value={trainingForm.time||""} onChange={e=>setTrainingForm({...trainingForm,time:e.target.value})} placeholder="Optional"/>
                   </div>
                   <div>
                     <label style={labelStyle}>Session Type</label>
@@ -1134,16 +1162,22 @@ export default function App() {
                     </select>
                   </div>
                 </div>
+
+                {/* Quick save prompt */}
+                <div style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:8, padding:"8px 12px", margin:"10px 0", fontSize:12, color:"#0369a1" }}>
+                  💡 Just saw it on WhatsApp? Fill in date, time and type then hit Save — you can add details later by tapping Edit!
+                </div>
+
                 <label style={labelStyle}>Location</label>
-                <input style={inputStyle} value={trainingForm.location} onChange={e=>setTrainingForm({...trainingForm,location:e.target.value})} placeholder="Training center, home, park…"/>
+                <input style={inputStyle} value={trainingForm.location||""} onChange={e=>setTrainingForm({...trainingForm,location:e.target.value})} placeholder="Training center, home, park…"/>
                 <label style={labelStyle}>Skills / Hide Types Worked</label>
-                <input style={inputStyle} value={trainingForm.skills} onChange={e=>setTrainingForm({...trainingForm,skills:e.target.value})} placeholder="e.g. NW3 interiors, vehicle combos, inaccessibles"/>
+                <input style={inputStyle} value={trainingForm.skills||""} onChange={e=>setTrainingForm({...trainingForm,skills:e.target.value})} placeholder="e.g. NW3 interiors, vehicle combos, inaccessibles"/>
                 <label style={labelStyle}>Notes</label>
-                <textarea style={{...inputStyle, height:72}} value={trainingForm.notes} onChange={e=>setTrainingForm({...trainingForm,notes:e.target.value})} placeholder="What went well, what to work on, patterns you noticed…"/>
+                <textarea style={{...inputStyle, height:72}} value={trainingForm.notes||""} onChange={e=>setTrainingForm({...trainingForm,notes:e.target.value})} placeholder="What went well, what to work on, patterns you noticed…"/>
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 2fr", gap:10 }}>
                   <div>
                     <label style={labelStyle}>Overall Feel</label>
-                    <select style={inputStyle} value={trainingForm.rating} onChange={e=>setTrainingForm({...trainingForm,rating:e.target.value})}>
+                    <select style={inputStyle} value={trainingForm.rating||"👍 Great"} onChange={e=>setTrainingForm({...trainingForm,rating:e.target.value})}>
                       <option>👍 Great</option>
                       <option>👌 Good</option>
                       <option>🤔 Mixed</option>
@@ -1152,12 +1186,12 @@ export default function App() {
                   </div>
                   <div>
                     <label style={labelStyle}>Video Link (optional)</label>
-                    <input style={inputStyle} value={trainingForm.videoLink} onChange={e=>setTrainingForm({...trainingForm,videoLink:e.target.value})} placeholder="Google Drive or YouTube URL"/>
+                    <input style={inputStyle} value={trainingForm.videoLink||""} onChange={e=>setTrainingForm({...trainingForm,videoLink:e.target.value})} placeholder="Google Drive or YouTube URL"/>
                   </div>
                 </div>
                 <div style={{ display:"flex", gap:8, marginTop:12 }}>
-                  <button type="submit" style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)" }}>Save Session</button>
-                  <button type="button" onClick={()=>setShowTrainingForm(false)} style={btnStyle("#aaa")}>Cancel</button>
+                  <button type="submit" style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)" }}>{editingTrainingId ? "Save Changes" : "Save Session"}</button>
+                  <button type="button" onClick={()=>{ setShowTrainingForm(false); setEditingTrainingId(null); setTrainingForm(blankTrainingForm()); }} style={btnStyle("#aaa")}>Cancel</button>
                 </div>
               </form>
             )}
@@ -1176,20 +1210,29 @@ export default function App() {
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
                     <div style={{ flex:1, marginRight:8 }}>
                       <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
-                        <div style={{ fontWeight:"bold", fontSize:14 }}>{entry.date}</div>
+                        <div style={{ fontWeight:"bold", fontSize:14 }}>
+                          {entry.date}{entry.time && <span style={{ color:"#888", fontWeight:"normal", fontSize:12 }}> · {entry.time}</span>}
+                        </div>
                         <span style={{ background:"#ede9fe", color:"#7c3aed", borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:"bold" }}>{entry.type}</span>
                         <span style={{ fontSize:16 }}>{entry.rating?.split(" ")[0]}</span>
                       </div>
                       {entry.location&&<div style={{ fontSize:12, color:"#666", marginTop:4 }}>📍 {entry.location}</div>}
                       {entry.skills&&<div style={{ fontSize:12, color:"#5b21b6", marginTop:4 }}>🎯 {entry.skills}</div>}
                       {entry.notes&&<div style={{ fontSize:12, color:"#555", marginTop:6, fontStyle:"italic", lineHeight:1.5 }}>{entry.notes}</div>}
+                      {/* Show "needs details" prompt if only basic info filled in */}
+                      {!entry.location && !entry.skills && !entry.notes && (
+                        <div style={{ fontSize:11, color:"#f59e0b", marginTop:4 }}>📝 Tap Edit to add session details</div>
+                      )}
                       {entry.videoLink&&(
                         <button onClick={()=>window.open(entry.videoLink,"_blank")} style={{ display:"flex", alignItems:"center", gap:6, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"5px 10px", fontSize:11, cursor:"pointer", marginTop:6, fontWeight:"bold" }}>
                           🎥 Watch Training Video →
                         </button>
                       )}
                     </div>
-                    <button onClick={()=>deleteTrainingEntry(entry.id)} style={{ ...btnStyle("#c0392b",true), padding:"3px 10px", fontSize:11, flexShrink:0 }}>Delete</button>
+                    <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+                      <button onClick={()=>startEditTraining(entry)} style={{ ...btnStyle("#7c3aed",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
+                      <button onClick={()=>deleteTrainingEntry(entry.id)} style={{ ...btnStyle("#c0392b",true), padding:"3px 10px", fontSize:11 }}>Delete</button>
+                    </div>
                   </div>
                 </div>
               ))
