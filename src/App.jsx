@@ -375,16 +375,15 @@ export default function App() {
 
   function toggleMulti(arr, val) { return arr.includes(val) ? arr.filter(x=>x!==val) : [...arr, val]; }
 
-  function saveRun(e) {
-    e.preventDefault();
-    if (!runForm.odors.length) return alert("Please select at least one odor.");
-    if (!runForm.elements.length) return alert("Please select at least one search element.");
+  function saveRun() {
+    if (!runForm.odors.length) { alert("Please select at least one odor."); return; }
+    if (!runForm.elements.length) { alert("Please select at least one search element."); return; }
     if (editingRunIdx !== null) {
       const runs = trainingForm.runs.map((r,i) => i===editingRunIdx ? {...runForm} : r);
-      setTrainingForm({...trainingForm, runs});
+      setTrainingForm(prev => ({...prev, runs}));
       setEditingRunIdx(null);
     } else {
-      setTrainingForm({...trainingForm, runs:[...trainingForm.runs, {...runForm}]});
+      setTrainingForm(prev => ({...prev, runs:[...(prev.runs||[]), {...runForm}]}));
     }
     setRunForm(blankRunForm());
     setShowRunForm(false);
@@ -1301,7 +1300,7 @@ export default function App() {
                     <input style={inputStyle} value={runForm.notes||""} onChange={e=>setRunForm({...runForm,notes:e.target.value})} placeholder="What happened on this run…"/>
 
                     <div style={{ display:"flex", gap:6, marginTop:8 }}>
-                      <button type="button" onClick={saveRun} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", fontSize:12, padding:"5px 14px" }}>
+                      <button type="button" onClick={(e)=>{e.preventDefault();e.stopPropagation();saveRun();}} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", fontSize:12, padding:"5px 14px" }}>
                         {editingRunIdx!==null?"Save Run":"Add Run"}
                       </button>
                       <button type="button" onClick={()=>{ setShowRunForm(false); setEditingRunIdx(null); setRunForm(blankRunForm()); }} style={{ ...btnStyle("#aaa"), fontSize:12, padding:"5px 14px" }}>Cancel</button>
