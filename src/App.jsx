@@ -97,6 +97,7 @@ export default function App() {
 
   const activeDog = dogs.find(d => d.id === activeDogId) || dogs[0];
   const today = new Date();
+  const todayStr = today.toLocaleDateString("en-CA"); // YYYY-MM-DD in local time
 
   // ── Auth listener ────────────────────────────────────────────
   useEffect(() => {
@@ -464,15 +465,15 @@ export default function App() {
   }
 
   // ── Derived ──────────────────────────────────────────────────
-  const upcoming     = trials.filter(t => new Date(t.date) >= today);
-  const deadlineSoon = trials.filter(t => { const d=(new Date(t.entryDeadline)-today)/86400000; return d>=0&&d<=14&&getStatus(t.id)==="none"; });
-  const opensSoon    = trials.filter(t => { const d=(new Date(t.entryOpens)-today)/86400000; return d>=0&&d<=7&&getStatus(t.id)==="none"; });
+  const upcoming     = trials.filter(t => t.date >= todayStr);
+  const deadlineSoon = trials.filter(t => { if (!t.entryDeadline) return false; const d = Math.ceil((new Date(t.entryDeadline+"T12:00:00") - today)/86400000); return d>=0&&d<=14&&getStatus(t.id)==="none"; });
+  const opensSoon    = trials.filter(t => { if (!t.entryOpens) return false; const d = Math.ceil((new Date(t.entryOpens+"T12:00:00") - today)/86400000); return d>=0&&d<=7&&getStatus(t.id)==="none"; });
   const titlesEarned = myResults.filter(r=>r.title).map(r=>({org:r.org,title:r.title,date:r.date,trial:r.trial}));
-  const trialsByView = trialView==="past" ? trials.filter(t=>new Date(t.date)<today) : trials.filter(t=>new Date(t.date)>=today);
+  const trialsByView = trialView==="past" ? trials.filter(t=>t.date < todayStr) : trials.filter(t=>t.date >= todayStr);
   const filtered = filterOrg === "All" ? trialsByView
     : filterOrg === "Entered" ? trialsByView.filter(t => getStatus(t.id)==="entered" || getStatus(t.id)==="waitlist")
     : trialsByView.filter(t => t.org === filterOrg);
-  const daysUntil = d => { const n=Math.ceil((new Date(d)-today)/86400000); return n<0?"Passed":n===0?"Today!":n===1?"Tomorrow":`${n} days`; };
+  const daysUntil = d => { if (!d) return ""; const n=Math.ceil((new Date(d+"T12:00:00")-today)/86400000); return n<0?"Passed":n===0?"Today!":n===1?"Tomorrow":`${n} days`; };
   const openMaps = (location) => {
     const encoded = encodeURIComponent(location);
     window.open(`https://maps.google.com/?q=${encoded}`, "_blank");
@@ -839,10 +840,10 @@ export default function App() {
             {/* Past / Upcoming toggle */}
             <div style={{ display:"flex", gap:6, marginBottom:12 }}>
               <button onClick={()=>setTrialView("upcoming")} style={{ background:trialView==="upcoming"?"linear-gradient(135deg,#7c3aed,#06b6d4)":"#ede9fe", color:trialView==="upcoming"?"#fff":"#7c3aed", border:"none", borderRadius:20, padding:"5px 16px", fontSize:12, cursor:"pointer", fontWeight:"bold" }}>
-                📅 Upcoming ({trials.filter(t=>new Date(t.date)>=today).length})
+                📅 Upcoming ({trials.filter(t=>t.date>=todayStr).length})
               </button>
               <button onClick={()=>setTrialView("past")} style={{ background:trialView==="past"?"linear-gradient(135deg,#7c3aed,#06b6d4)":"#ede9fe", color:trialView==="past"?"#fff":"#7c3aed", border:"none", borderRadius:20, padding:"5px 16px", fontSize:12, cursor:"pointer", fontWeight:"bold" }}>
-                🏁 Past ({trials.filter(t=>new Date(t.date)<today).length})
+                🏁 Past ({trials.filter(t=>t.date<todayStr).length})
               </button>
             </div>
             <OrgFilter value={filterOrg} onChange={setFilterOrg} dogRegs={dogRegs}/>
@@ -850,8 +851,8 @@ export default function App() {
             {filtered.map(t => {
               const status = getStatus(t.id);
               const paid   = getPaid(t.id);
-              const isPast = new Date(t.date) < today;
-              const entriesClosed = t.entryDeadline && new Date(t.entryDeadline) < today;
+              const isPast = t.date < todayStr;
+              const entriesClosed = t.entryDeadline && t.entryDeadline < todayStr;
               const statusColors = {
                 none:      { bg:"#f5f3ff", color:"#7c3aed", border:"#7c3aed" },
                 waitlist:  { bg:"#fff8e1", color:"#f59e0b", border:"#f59e0b" },
@@ -873,8 +874,8 @@ export default function App() {
                       {t.entryDeadline&&<div style={{ fontSize:11, color:entriesClosed?"#bbb":"#e07b39", marginTop:3 }}>
                         📌 {entriesClosed?"Entries closed":"Deadline:"} {t.entryDeadline}{!entriesClosed&&` · ${daysUntil(t.entryDeadline)}`}
                       </div>}
-                      {t.entryOpens&&!isPast&&!entriesClosed&&<div style={{ fontSize:11, color: new Date(t.entryOpens)<=today?"#27ae60":"#3a7bd5", marginTop:2, fontWeight: new Date(t.entryOpens)<=today?"bold":"normal" }}>
-                        {new Date(t.entryOpens)<=today ? "🟢 Entries Open!" : `🔔 Opens: ${t.entryOpens} · ${daysUntil(t.entryOpens)}`}
+                      {t.entryOpens&&!isPast&&!entriesClosed&&<div style={{ fontSize:11, color: t.entryOpens<=todayStr?"#27ae60":"#3a7bd5", marginTop:2, fontWeight: t.entryOpens<=todayStr?"bold":"normal" }}>
+                        {t.entryOpens<=todayStr ? "🟢 Entries Open!" : `🔔 Opens: ${t.entryOpens} · ${daysUntil(t.entryOpens)}`}
                       </div>}
                       {entriesClosed&&!isPast&&<div style={{ fontSize:11, color:"#bbb", marginTop:2 }}>🔴 Entries Closed</div>}
                       {/* Enter Now — only show if entries are open and not yet closed */}
