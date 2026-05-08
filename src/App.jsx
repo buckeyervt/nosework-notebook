@@ -68,11 +68,15 @@ export default function App() {
   // ── UI ───────────────────────────────────────────────────────
   const [filterOrg, setFilterOrg]           = useState("All");
   const [showResultForm, setShowResultForm] = useState(false);
-  const [resultForm, setResultForm]         = useState({ org:"NACSW", trial:"", date:"", level:"", result:"Pass", title:"", notes:"", videoLink:"" });
+  const [resultForm, setResultForm]         = useState({ org:"NACSW", trial:"", date:"", title:"", notes:"", videoLink:"", runs:[] });
+  const [resultPhotoFile, setResultPhotoFile] = useState(null);
+  const [editingResultId, setEditingResultId] = useState(null);
+  const [showRunResultForm, setShowRunResultForm] = useState(false);
+  const [runResultForm, setRunResultForm]   = useState({ element:"Interior", level:"", result:"Pass", isGame:false, gameName:"", place:"", outOf:"", time:"", notes:"" });
+  const [editingRunResultIdx, setEditingRunResultIdx] = useState(null);
   const [showTitleForm, setShowTitleForm]   = useState(false);
   const [titleForm, setTitleForm]           = useState({ org:"NACSW", title:"", trial:"", date:"" });
   const [trialView, setTrialView]           = useState("upcoming"); // "upcoming" | "past"
-  const [resultPhotoFile, setResultPhotoFile] = useState(null);
 
   // ── Training state ───────────────────────────────────────────
   const [allTraining, setAllTraining]           = useState({});
@@ -327,10 +331,30 @@ export default function App() {
   const getPaid   = (trialId) => dogRegs[trialId]?.paid || false;
 
   // ── Results ──────────────────────────────────────────────────
+  const blankResultForm = () => ({ org:"NACSW", trial:"", date:"", title:"", notes:"", videoLink:"", runs:[] });
+  const blankRunResultForm = () => ({ element:"Interior", level:"", result:"Pass", isGame:false, gameName:"", place:"", outOf:"", time:"", notes:"" });
+
+  function saveRunResult() {
+    if (!runResultForm.element) { alert("Please select a search element."); return; }
+    if (editingRunResultIdx !== null) {
+      const runs = resultForm.runs.map((r,i) => i===editingRunResultIdx ? {...runResultForm} : r);
+      setResultForm(prev => ({...prev, runs}));
+      setEditingRunResultIdx(null);
+    } else {
+      setResultForm(prev => ({...prev, runs:[...(prev.runs||[]), {...runResultForm}]}));
+    }
+    setRunResultForm(blankRunResultForm());
+    setShowRunResultForm(false);
+  }
+
+  function deleteRunResult(idx) {
+    setResultForm(prev => ({...prev, runs: prev.runs.filter((_,i)=>i!==idx)}));
+  }
+
   async function addResult(e) {
     e.preventDefault();
     if (!activeDog) return;
-    let photoUrl = "";
+    let photoUrl = editingResultId ? (allResults[activeDog.id]?.find(r=>r.id===editingResultId)?.photoUrl||"") : "";
     if (resultPhotoFile) {
       try {
         const storageRef = ref(storage, `ribbons/${user.uid}/${Date.now()}`);
@@ -338,12 +362,41 @@ export default function App() {
         photoUrl = await getDownloadURL(storageRef);
       } catch (err) { console.error("Ribbon photo error:", err); }
     }
-    const newResult = { ...resultForm, id: Date.now().toString(), photoUrl };
-    const newResults = { ...allResults, [activeDog.id]: [...(allResults[activeDog.id]||[]), newResult] };
-    setAllResults(newResults); setShowResultForm(false); setResultPhotoFile(null);
-    setResultForm({ org:"NACSW", trial:"", date:"", level:"", result:"Pass", title:"", notes:"", videoLink:"" });
+    if (editingResultId) {
+      const newResults = { ...allResults, [activeDog.id]: (allResults[activeDog.id]||[]).map(r => r.id===editingResultId ? {...resultForm, id:editingResultId, photoUrl} : r) };
+      setAllResults(newResults);
+      setEditingResultId(null);
+      await saveUserData({ results: newResults });
+    } else {
+      const newResult = { ...resultForm, id: Date.now().toString(), photoUrl };
+      const newResults = { ...allResults, [activeDog.id]: [...(allResults[activeDog.id]||[]), newResult] };
+      setAllResults(newResults);
+      await saveUserData({ results: newResults });
+    }
+    setShowResultForm(false);
+    setResultPhotoFile(null);
+    setResultForm(blankResultForm());
+    setRunResultForm(blankRunResultForm());
+    setShowRunResultForm(false);
+    setEditingRunResultIdx(null);
+  }
+
+  function startEditResult(r) {
+    setResultForm({...r, runs: r.runs||[]});
+    setEditingResultId(r.id);
+    setShowResultForm(true);
+    setShowRunResultForm(false);
+    setEditingRunResultIdx(null);
+    window.scrollTo(0,0);
+  }
+
+  async function deleteResult(id) {
+    if (!activeDog) return;
+    const newResults = { ...allResults, [activeDog.id]: (allResults[activeDog.id]||[]).filter(r=>r.id!==id) };
+    setAllResults(newResults);
     await saveUserData({ results: newResults });
   }
+
   const myResults = activeDog ? (allResults[activeDog.id] || []) : [];
 
   // ── Manual title entry ───────────────────────────────────────
@@ -930,32 +983,34 @@ export default function App() {
           </div>
         )}
 
+
         {/* RESULTS */}
         {tab==="Results" && (
           <div>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
               <OrgFilter value={filterOrg} onChange={setFilterOrg}/>
-              <button onClick={()=>setShowResultForm(!showResultForm)} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)" }}>+ Add Result</button>
+              <button onClick={()=>{ setResultForm(blankResultForm()); setEditingResultId(null); setShowRunResultForm(false); setShowResultForm(!showResultForm); }} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)" }}>
+                {showResultForm && !editingResultId ? "Cancel" : "+ Add Result"}
+              </button>
             </div>
-            {showResultForm&&(
+
+            {showResultForm && (
               <form onSubmit={addResult} style={formStyle}>
-                <div style={formTitle}>Log Result — {activeDog?.callName}</div>
+                <div style={formTitle}>{editingResultId ? "✏️ Edit Result" : "Log Result"} — {activeDog?.callName}</div>
+
+                {/* Trial info */}
                 <label style={labelStyle}>Organization</label>
                 <select style={inputStyle} value={resultForm.org} onChange={e=>setResultForm({...resultForm,org:e.target.value})}>{ORGS.map(o=><option key={o}>{o}</option>)}</select>
                 <label style={labelStyle}>Trial Name</label>
-                <input required style={inputStyle} value={resultForm.trial} onChange={e=>setResultForm({...resultForm,trial:e.target.value})} placeholder="e.g. KCGV May Scent Work Trial" />
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-                  <div><label style={labelStyle}>Date</label><input required type="date" style={inputStyle} value={resultForm.date} onChange={e=>setResultForm({...resultForm,date:e.target.value})}/></div>
-                  <div><label style={labelStyle}>Level</label><input style={inputStyle} value={resultForm.level} onChange={e=>setResultForm({...resultForm,level:e.target.value})} placeholder="Novice A"/></div>
-                </div>
-                <label style={labelStyle}>Result</label>
-                <select style={inputStyle} value={resultForm.result} onChange={e=>setResultForm({...resultForm,result:e.target.value})}>
-                  <option>Pass</option><option>NCA</option><option>False Alert</option><option>DNF</option><option>Incomplete</option>
-                </select>
+                <input required style={inputStyle} value={resultForm.trial||""} onChange={e=>setResultForm({...resultForm,trial:e.target.value})} placeholder="e.g. USCSS Novice/Senior Classic" />
+                <label style={labelStyle}>Date</label>
+                <input required type="date" style={inputStyle} value={resultForm.date||""} onChange={e=>setResultForm({...resultForm,date:e.target.value})}/>
                 <label style={labelStyle}>Title Earned (if any)</label>
-                <input style={inputStyle} value={resultForm.title} onChange={e=>setResultForm({...resultForm,title:e.target.value})} placeholder="e.g. NW1, SBN…" />
-                <label style={labelStyle}>Notes</label>
-                <textarea style={{...inputStyle,height:56}} value={resultForm.notes} onChange={e=>setResultForm({...resultForm,notes:e.target.value})} placeholder="How did it go?"/>
+                <input style={inputStyle} value={resultForm.title||""} onChange={e=>setResultForm({...resultForm,title:e.target.value})} placeholder="e.g. SBN, NW1…" />
+                <label style={labelStyle}>Overall Notes</label>
+                <textarea style={{...inputStyle,height:56}} value={resultForm.notes||""} onChange={e=>setResultForm({...resultForm,notes:e.target.value})} placeholder="How did the day go overall?"/>
+
+                {/* Ribbon photo */}
                 <label style={labelStyle}>📸 Ribbon Photo (optional)</label>
                 <div style={{ border:"1px dashed #ddd6fe", borderRadius:8, padding:10, background:"#faf5ff", marginBottom:4 }}>
                   {resultPhotoFile ? (
@@ -973,33 +1028,159 @@ export default function App() {
                     </label>
                   )}
                 </div>
-                <label style={labelStyle}>🎥 Run Video Link (optional)</label>
-                <div style={{ background:"#f0fdf4", border:"1px dashed #86efac", borderRadius:8, padding:10, marginBottom:4 }}>
-                  <div style={{ fontSize:11, color:"#16a34a", marginBottom:6 }}>Paste a Google Drive, YouTube, or any video link. Upload your video there first, then paste the link here.</div>
-                  <input style={{...inputStyle, marginBottom:0}} value={resultForm.videoLink||""} onChange={e=>setResultForm({...resultForm,videoLink:e.target.value})} placeholder="https://drive.google.com/..." />
+
+                {/* Video link */}
+                <label style={labelStyle}>🎥 Video Link (optional)</label>
+                <input style={inputStyle} value={resultForm.videoLink||""} onChange={e=>setResultForm({...resultForm,videoLink:e.target.value})} placeholder="https://drive.google.com/..."/>
+
+                {/* ── RUNS ── */}
+                <div style={{ margin:"14px 0 8px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div style={{ fontWeight:"bold", fontSize:13, color:"#5b21b6" }}>Runs ({resultForm.runs?.length||0})</div>
+                  <button type="button" onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); setRunResultForm(blankRunResultForm()); setEditingRunResultIdx(null); setShowRunResultForm(!showRunResultForm); }} style={{ ...btnStyle("#06b6d4",true), padding:"3px 12px", fontSize:11 }}>
+                    {showRunResultForm && editingRunResultIdx===null ? "Cancel" : "+ Add Run"}
+                  </button>
                 </div>
-                <div style={{ display:"flex", gap:8, marginTop:10 }}>
-                  <button type="submit" style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)" }}>Save</button>
-                  <button type="button" onClick={()=>setShowResultForm(false)} style={btnStyle("#aaa")}>Cancel</button>
+
+                {/* Run form */}
+                {showRunResultForm && (
+                  <div style={{ background:"#f0fdff", border:"1px solid #a5f3fc", borderRadius:10, padding:12, marginBottom:10 }}>
+                    <div style={{ fontWeight:"bold", fontSize:12, color:"#0e7490", marginBottom:8 }}>{editingRunResultIdx!==null ? "Edit Run" : `Run ${(resultForm.runs?.length||0)+1}`}</div>
+
+                    {/* Element */}
+                    <label style={labelStyle}>Search Element</label>
+                    <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:6 }}>
+                      {["Interior","Exterior","Vehicle","Container","Buried","Water"].map(el=>(
+                        <button type="button" key={el} onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); setRunResultForm({...runResultForm,element:el}); }} style={{
+                          background: runResultForm.element===el?"linear-gradient(135deg,#7c3aed,#06b6d4)":"#fff",
+                          color: runResultForm.element===el?"#fff":"#7c3aed",
+                          border:`1px solid ${runResultForm.element===el?"transparent":"#ddd6fe"}`,
+                          borderRadius:20, padding:"4px 12px", fontSize:11, cursor:"pointer", fontWeight: runResultForm.element===el?"bold":"normal"
+                        }}>{el}</button>
+                      ))}
+                    </div>
+
+                    {/* Level + Result */}
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                      <div>
+                        <label style={labelStyle}>Level / Class</label>
+                        <input style={inputStyle} value={runResultForm.level||""} onChange={e=>setRunResultForm({...runResultForm,level:e.target.value})} placeholder="e.g. Novice A"/>
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Result</label>
+                        <select style={inputStyle} value={runResultForm.result} onChange={e=>setRunResultForm({...runResultForm,result:e.target.value})}>
+                          <option>Pass</option><option>NQ</option><option>NCA</option><option>False Alert</option><option>DNF</option><option>Incomplete</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Placement + Time */}
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
+                      <div>
+                        <label style={labelStyle}>Place</label>
+                        <input style={inputStyle} type="number" min="1" value={runResultForm.place||""} onChange={e=>setRunResultForm({...runResultForm,place:e.target.value})} placeholder="e.g. 4"/>
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Out of</label>
+                        <input style={inputStyle} type="number" min="1" value={runResultForm.outOf||""} onChange={e=>setRunResultForm({...runResultForm,outOf:e.target.value})} placeholder="e.g. 5"/>
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Time</label>
+                        <input style={inputStyle} value={runResultForm.time||""} onChange={e=>setRunResultForm({...runResultForm,time:e.target.value})} placeholder="e.g. 1:43"/>
+                      </div>
+                    </div>
+
+                    {/* Game toggle */}
+                    <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", marginTop:8, marginBottom:4 }}>
+                      <input type="checkbox" checked={runResultForm.isGame||false} onChange={e=>setRunResultForm({...runResultForm,isGame:e.target.checked, gameName:e.target.checked?runResultForm.gameName:""})}/>
+                      <span style={{ fontSize:12, color:"#5b21b6", fontWeight:"bold" }}>🎮 This was a game element</span>
+                    </label>
+                    {runResultForm.isGame && (
+                      <input style={inputStyle} value={runResultForm.gameName||""} onChange={e=>setRunResultForm({...runResultForm,gameName:e.target.value})} placeholder="Game name e.g. Hide of Hides, Handler Discrimination…"/>
+                    )}
+
+                    <label style={labelStyle}>Run Notes</label>
+                    <input style={inputStyle} value={runResultForm.notes||""} onChange={e=>setRunResultForm({...runResultForm,notes:e.target.value})} placeholder="What happened on this run…"/>
+
+                    <div style={{ display:"flex", gap:6, marginTop:8 }}>
+                      <button type="button" onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); saveRunResult(); }} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", fontSize:12, padding:"5px 14px" }}>
+                        {editingRunResultIdx!==null ? "Save Run" : "Add Run"}
+                      </button>
+                      <button type="button" onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); setShowRunResultForm(false); setEditingRunResultIdx(null); setRunResultForm(blankRunResultForm()); }} style={{ ...btnStyle("#aaa"), fontSize:12, padding:"5px 14px" }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Runs list in form */}
+                {(resultForm.runs||[]).map((run,idx)=>(
+                  <div key={idx} style={{ background:"#faf5ff", borderRadius:8, padding:"8px 12px", marginBottom:6, border:"1px solid #e9d5ff", display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ display:"flex", gap:4, flexWrap:"wrap", alignItems:"center", marginBottom:2 }}>
+                        <span style={{ fontSize:11, color:"#888" }}>Run {idx+1}:</span>
+                        <span style={{ background:"#ede9fe", color:"#7c3aed", borderRadius:20, padding:"1px 8px", fontSize:10, fontWeight:"bold" }}>{run.element}</span>
+                        <span style={{ background: run.result==="Pass"?"#e8f8ee":"#ffeaea", color: run.result==="Pass"?"#27ae60":"#c0392b", borderRadius:20, padding:"1px 8px", fontSize:10, fontWeight:"bold" }}>{run.result}</span>
+                        {run.level&&<span style={{ background:"#f0f9ff", color:"#0369a1", borderRadius:20, padding:"1px 8px", fontSize:10 }}>{run.level}</span>}
+                        {run.isGame&&<span style={{ background:"#fef3c7", color:"#b45309", borderRadius:20, padding:"1px 8px", fontSize:10 }}>🎮 {run.gameName||"Game"}</span>}
+                        {run.place&&<span style={{ fontSize:10, color:"#888" }}>📊 {run.place}{run.outOf?`/${run.outOf}`:""}</span>}
+                        {run.time&&<span style={{ fontSize:10, color:"#888" }}>⏱ {run.time}</span>}
+                      </div>
+                      {run.notes&&<div style={{ fontSize:10, color:"#888" }}>{run.notes}</div>}
+                    </div>
+                    <div style={{ display:"flex", gap:4, flexShrink:0, marginLeft:6 }}>
+                      <button type="button" onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); setRunResultForm({...run}); setEditingRunResultIdx(idx); setShowRunResultForm(true); }} style={{ ...btnStyle("#7c3aed",true), padding:"2px 8px", fontSize:10 }}>Edit</button>
+                      <button type="button" onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); deleteRunResult(idx); }} style={{ ...btnStyle("#c0392b",true), padding:"2px 8px", fontSize:10 }}>Del</button>
+                    </div>
+                  </div>
+                ))}
+
+                <div style={{ display:"flex", gap:8, marginTop:14 }}>
+                  <button type="submit" style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)" }}>{editingResultId?"Save Changes":"Save Result"}</button>
+                  <button type="button" onClick={()=>{ setShowResultForm(false); setEditingResultId(null); setResultForm(blankResultForm()); setShowRunResultForm(false); }} style={btnStyle("#aaa")}>Cancel</button>
                 </div>
               </form>
             )}
+
+            {/* Results list */}
             {(filterOrg==="All"?myResults:myResults.filter(r=>r.org===filterOrg)).slice().reverse().map(r=>(
               <div key={r.id} style={{ background:ORG_BG[r.org]||"#fff", borderRadius:12, padding:14, marginBottom:10, borderLeft:`5px solid ${ORG_COLORS[r.org]}` }}>
-                <div style={{ display:"flex", justifyContent:"space-between" }}>
-                  <div><div style={{ fontWeight:"bold" }}>{r.trial}</div><div style={{ fontSize:12, color:"#888" }}><OrgBadge org={r.org}/> · {r.level} · {r.date}</div></div>
-                  <div style={{ textAlign:"right" }}>
-                    <span style={{ background:r.result==="Pass"?"#e8f8ee":"#ffeaea", color:r.result==="Pass"?"#27ae60":"#c0392b", borderRadius:20, padding:"3px 10px", fontSize:12, fontWeight:"bold" }}>{r.result}</span>
-                    {r.title&&<div style={{ fontSize:11, color:"#e07b39", fontWeight:"bold", marginTop:4 }}>🏆 {r.title}</div>}
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                  <div style={{ flex:1, marginRight:8 }}>
+                    <div style={{ fontWeight:"bold", fontSize:14 }}>{r.trial}</div>
+                    <div style={{ fontSize:12, color:"#888", marginTop:2 }}><OrgBadge org={r.org}/> · {r.date}</div>
+                    {r.title&&<div style={{ fontSize:12, color:"#e07b39", fontWeight:"bold", marginTop:3 }}>🏆 {r.title}</div>}
+                    {r.notes&&<div style={{ fontSize:12, color:"#777", marginTop:4, fontStyle:"italic" }}>{r.notes}</div>}
+
+                    {/* Runs */}
+                    {(r.runs?.length>0) && (
+                      <div style={{ marginTop:8 }}>
+                        {r.runs.map((run,i)=>(
+                          <div key={i} style={{ background:"rgba(255,255,255,0.7)", borderRadius:8, padding:"6px 10px", marginBottom:4, border:"1px solid rgba(0,0,0,0.06)" }}>
+                            <div style={{ display:"flex", gap:4, flexWrap:"wrap", alignItems:"center" }}>
+                              <span style={{ fontSize:11, color:"#888" }}>Run {i+1}:</span>
+                              <span style={{ background:"#ede9fe", color:"#7c3aed", borderRadius:20, padding:"1px 8px", fontSize:10, fontWeight:"bold" }}>{run.element}</span>
+                              <span style={{ background: run.result==="Pass"?"#e8f8ee":"#ffeaea", color: run.result==="Pass"?"#27ae60":"#c0392b", borderRadius:20, padding:"1px 8px", fontSize:10, fontWeight:"bold" }}>{run.result}</span>
+                              {run.level&&<span style={{ background:"#f0f9ff", color:"#0369a1", borderRadius:20, padding:"1px 8px", fontSize:10 }}>{run.level}</span>}
+                              {run.isGame&&<span style={{ background:"#fef3c7", color:"#b45309", borderRadius:20, padding:"1px 8px", fontSize:10 }}>🎮 {run.gameName||"Game"}</span>}
+                              {run.place&&<span style={{ fontSize:10, color:"#555", fontWeight:"bold" }}>📊 {run.place}{run.outOf?` of ${run.outOf}`:""}</span>}
+                              {run.time&&<span style={{ fontSize:10, color:"#666" }}>⏱ {run.time}</span>}
+                            </div>
+                            {run.notes&&<div style={{ fontSize:10, color:"#888", marginTop:2, fontStyle:"italic" }}>{run.notes}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {r.photoUrl&&<img src={r.photoUrl} alt="ribbon" style={{ width:"100%", maxHeight:200, objectFit:"cover", borderRadius:8, marginTop:8 }}/>}
+                    {r.videoLink&&(
+                      <button onClick={()=>window.open(r.videoLink,"_blank")} style={{ display:"flex", alignItems:"center", gap:6, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"6px 12px", fontSize:12, cursor:"pointer", marginTop:8, fontWeight:"bold" }}>
+                        🎥 Watch Run Video →
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+                    <button onClick={()=>startEditResult(r)} style={{ ...btnStyle("#7c3aed",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
+                    <button onClick={()=>deleteResult(r.id)} style={{ ...btnStyle("#c0392b",true), padding:"3px 10px", fontSize:11 }}>Del</button>
                   </div>
                 </div>
-                {r.notes&&<div style={{ fontSize:12, color:"#777", marginTop:6, fontStyle:"italic" }}>{r.notes}</div>}
-                {r.photoUrl&&<img src={r.photoUrl} alt="ribbon" style={{ width:"100%", maxHeight:200, objectFit:"cover", borderRadius:8, marginTop:8 }}/>}
-                {r.videoLink&&(
-                  <button onClick={()=>window.open(r.videoLink,"_blank")} style={{ display:"flex", alignItems:"center", gap:6, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"6px 12px", fontSize:12, cursor:"pointer", marginTop:8, fontWeight:"bold" }}>
-                    🎥 Watch Run Video →
-                  </button>
-                )}
               </div>
             ))}
             {myResults.length===0&&<div style={{ color:"#bbb", fontSize:13, textAlign:"center", marginTop:30 }}>No results logged yet!</div>}
@@ -1481,12 +1662,26 @@ function StatCard({label,value,icon,small}) {
 function ResultRow({r}) {
   return (
     <div style={{ padding:"10px 0", borderBottom:"1px solid #e9d5ff" }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-        <div><div style={{ fontSize:14, fontWeight:"bold" }}>{r.trial}</div><div style={{ fontSize:12, color:"#888" }}><OrgBadge org={r.org}/> · {r.date}</div></div>
-        <div style={{ textAlign:"right" }}>
-          <span style={{ background:r.result==="Pass"?"#e8f8ee":"#ffeaea", color:r.result==="Pass"?"#27ae60":"#c0392b", borderRadius:20, padding:"2px 10px", fontSize:11 }}>{r.result}</span>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+        <div style={{ flex:1, marginRight:8 }}>
+          <div style={{ fontSize:14, fontWeight:"bold" }}>{r.trial}</div>
+          <div style={{ fontSize:12, color:"#888" }}><OrgBadge org={r.org}/> · {r.date}</div>
           {r.title&&<div style={{ fontSize:11, color:"#e07b39", fontWeight:"bold", marginTop:2 }}>🏆 {r.title}</div>}
+          {(r.runs?.length>0)&&(
+            <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginTop:4 }}>
+              {r.runs.map((run,i)=>(
+                <span key={i} style={{ background: run.result==="Pass"?"#e8f8ee":"#ffeaea", color: run.result==="Pass"?"#27ae60":"#c0392b", borderRadius:20, padding:"1px 8px", fontSize:10, fontWeight:"bold" }}>
+                  {run.element} {run.result==="Pass"?"✓":"✗"}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
+        {r.runs?.length>0 && (
+          <span style={{ background: r.runs.every(run=>run.result==="Pass")?"#e8f8ee":"#ffeaea", color: r.runs.every(run=>run.result==="Pass")?"#27ae60":"#c0392b", borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:"bold", flexShrink:0 }}>
+            {r.runs.filter(run=>run.result==="Pass").length}/{r.runs.length} Q
+          </span>
+        )}
       </div>
       {r.photoUrl&&<img src={r.photoUrl} alt="ribbon" style={{ width:"100%", maxHeight:160, objectFit:"cover", borderRadius:8, marginTop:8 }}/>}
       {r.videoLink&&(
