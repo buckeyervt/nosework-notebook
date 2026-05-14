@@ -125,21 +125,23 @@ export default function App() {
   // ── Load user data from Firebase (real-time) ─────────────────
   useEffect(() => {
     if (!user) return;
+    setDataLoaded(false);
     const unsub = onSnapshot(doc(db, "users", user.uid), snap => {
       if (snap.exists()) {
         const data = snap.data();
         const loadedDogs = data.dogs || [];
         setDogs(loadedDogs);
-        setActiveDogId(current => {
-          if (current) return current; // keep current if already set
-          if (data.activeDogId && loadedDogs.find(d => d.id === data.activeDogId)) return data.activeDogId;
-          return loadedDogs[0]?.id || null; // fallback to first dog
-        });
         setRegistrations(data.registrations || {});
         setAllResults(data.results || {});
         setPhotos(data.photos || {});
         setAllTraining(data.training || {});
+        setActiveDogId(current => {
+          if (current && loadedDogs.find(d => d.id === current)) return current;
+          if (data.activeDogId && loadedDogs.find(d => d.id === data.activeDogId)) return data.activeDogId;
+          return loadedDogs[0]?.id || null;
+        });
       }
+      // Always set dataLoaded LAST after all state is set
       setDataLoaded(true);
     }, () => setDataLoaded(true));
     return () => unsub();
@@ -612,6 +614,13 @@ export default function App() {
   // ════════════════════════════════════════════════════════════
   // ONBOARDING — first dog setup
   // ════════════════════════════════════════════════════════════
+  // Show loading while data is being fetched
+  if (user && !dataLoaded) return (
+    <div style={{ fontFamily:"Georgia,serif", background:"linear-gradient(135deg,#6b21a8,#7c3aed,#06b6d4)", minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ color:"#fff", fontSize:16 }}>🐾 Loading your dogs...</div>
+    </div>
+  );
+
   if (user && dataLoaded && dogs.length === 0) return (
     <div style={{ fontFamily:"Georgia,serif", background:"linear-gradient(135deg,#6b21a8,#7c3aed,#06b6d4)", minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
       <div style={{ background:"#fff", borderRadius:20, padding:28, maxWidth:420, width:"100%" }}>
