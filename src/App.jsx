@@ -127,9 +127,11 @@ export default function App() {
     if (!user) return;
     setDataLoaded(false);
     const unsub = onSnapshot(doc(db, "users", user.uid), snap => {
+      console.log("🔥 Snapshot fired. exists:", snap.exists(), "uid:", user.uid);
       if (snap.exists()) {
         const data = snap.data();
         const loadedDogs = data.dogs || [];
+        console.log("🐕 Dogs loaded:", loadedDogs.length, "activeDogId:", data.activeDogId);
         setDogs(loadedDogs);
         setRegistrations(data.registrations || {});
         setAllResults(data.results || {});
@@ -140,10 +142,11 @@ export default function App() {
           if (data.activeDogId && loadedDogs.find(d => d.id === data.activeDogId)) return data.activeDogId;
           return loadedDogs[0]?.id || null;
         });
+      } else {
+        console.log("⚠️ No document found for uid:", user.uid);
       }
-      // Always set dataLoaded LAST after all state is set
       setDataLoaded(true);
-    }, () => setDataLoaded(true));
+    }, (err) => { console.error("❌ Snapshot error:", err); setDataLoaded(true); });
     return () => unsub();
   }, [user]);
 
