@@ -128,8 +128,13 @@ export default function App() {
     const unsub = onSnapshot(doc(db, "users", user.uid), snap => {
       if (snap.exists()) {
         const data = snap.data();
-        setDogs(data.dogs || []);
-        setActiveDogId(id => id || data.activeDogId || null);
+        const loadedDogs = data.dogs || [];
+        setDogs(loadedDogs);
+        setActiveDogId(current => {
+          if (current) return current; // keep current if already set
+          if (data.activeDogId && loadedDogs.find(d => d.id === data.activeDogId)) return data.activeDogId;
+          return loadedDogs[0]?.id || null; // fallback to first dog
+        });
         setRegistrations(data.registrations || {});
         setAllResults(data.results || {});
         setPhotos(data.photos || {});
@@ -201,7 +206,7 @@ export default function App() {
   async function handleLogout() {
     await signOut(auth);
     setDogs([]); setActiveDogId(null); setRegistrations({});
-    setAllResults({}); setPhotos({}); setDataLoaded(false);
+    setAllResults({}); setPhotos({}); setAllTraining({}); setDataLoaded(false); setUser(null);
   }
 
   // ── Account management ───────────────────────────────────────
