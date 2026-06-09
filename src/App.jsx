@@ -127,11 +127,9 @@ export default function App() {
     if (!user) return;
     setDataLoaded(false);
     const unsub = onSnapshot(doc(db, "users", user.uid), snap => {
-      console.log("🔥 Snapshot fired. exists:", snap.exists(), "uid:", user.uid);
       if (snap.exists()) {
         const data = snap.data();
         const loadedDogs = data.dogs || [];
-        console.log("🐕 Dogs loaded:", loadedDogs.length, "activeDogId:", data.activeDogId);
         setDogs(loadedDogs);
         setRegistrations(data.registrations || {});
         setAllResults(data.results || {});
@@ -142,11 +140,9 @@ export default function App() {
           if (data.activeDogId && loadedDogs.find(d => d.id === data.activeDogId)) return data.activeDogId;
           return loadedDogs[0]?.id || null;
         });
-      } else {
-        console.log("⚠️ No document found for uid:", user.uid);
       }
       setDataLoaded(true);
-    }, (err) => { console.error("❌ Snapshot error:", err); setDataLoaded(true); });
+    }, (err) => { console.error("Snapshot error:", err); setDataLoaded(true); });
     return () => unsub();
   }, [user]);
 
@@ -342,7 +338,7 @@ export default function App() {
 
   // ── Results ──────────────────────────────────────────────────
   const blankResultForm = () => ({ org:"NACSW", trial:"", date:"", title:"", notes:"", videoLink:"", runs:[] });
-  const blankRunResultForm = () => ({ element:"Interior", level:"", result:"Pass", isGame:false, gameName:"", place:"", outOf:"", time:"", notes:"" });
+  const blankRunResultForm = () => ({ element:"Interior", level:"", result:"Pass", isGame:false, gameName:"", place:"", outOf:"", time:"", notes:"", videoUrl:"" });
 
   function saveRunResult() {
     if (!runResultForm.element) { alert("Please select a search element."); return; }
@@ -435,12 +431,12 @@ export default function App() {
   // ── Training ─────────────────────────────────────────────────
   const myTraining = activeDog ? (allTraining[activeDog.id] || []) : [];
   const blankTrainingForm = () => ({ date: new Date().toISOString().slice(0,10), time:"", type:"Class", location:"", notes:"", rating:"👍 Great", videoLink:"", runs:[] });
-  const blankRunForm = () => ({ odors:[], hideCount:"Single", hideType:"Blind", elements:[], blindOutcome:"", converging:false, notes:"" });
+  const blankRunForm = () => ({ odors:[], hideCount:"Single", hideType:"Blind", elements:[], blindOutcome:"", converging:false, notes:"", videoUrl:"" });
 
   function toggleMulti(arr, val) { return arr.includes(val) ? arr.filter(x=>x!==val) : [...arr, val]; }
 
   function saveRun() {
-    if (!runForm.odors.length) { alert("Please select at least one odor."); return; }
+    if (!runForm.odors.length) { alert("Please select at least one odor, or tap Unknown if you're not sure yet."); return; }
     if (!runForm.elements.length) { alert("Please select at least one search element."); return; }
     if (editingRunIdx !== null) {
       const runs = trainingForm.runs.map((r,i) => i===editingRunIdx ? {...runForm} : r);
@@ -1046,9 +1042,7 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Video link */}
-                <label style={labelStyle}>🎥 Video Link (optional)</label>
-                <input style={inputStyle} value={resultForm.videoLink||""} onChange={e=>setResultForm({...resultForm,videoLink:e.target.value})} placeholder="https://drive.google.com/..."/>
+                {/* Video link moved to per-run level */}
 
                 {/* ── RUNS ── */}
                 <div style={{ margin:"14px 0 8px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
@@ -1117,6 +1111,8 @@ export default function App() {
 
                     <label style={labelStyle}>Run Notes</label>
                     <input style={inputStyle} value={runResultForm.notes||""} onChange={e=>setRunResultForm({...runResultForm,notes:e.target.value})} placeholder="What happened on this run…"/>
+                    <label style={labelStyle}>🎥 Run Video Link (optional)</label>
+                    <input style={inputStyle} value={runResultForm.videoUrl||""} onChange={e=>setRunResultForm({...runResultForm,videoUrl:e.target.value})} placeholder="https://drive.google.com/… or YouTube URL"/>
 
                     <div style={{ display:"flex", gap:6, marginTop:8 }}>
                       <button type="button" onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); saveRunResult(); }} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", fontSize:12, padding:"5px 14px" }}>
@@ -1141,6 +1137,7 @@ export default function App() {
                         {run.time&&<span style={{ fontSize:10, color:"#888" }}>⏱ {run.time}</span>}
                       </div>
                       {run.notes&&<div style={{ fontSize:10, color:"#888" }}>{run.notes}</div>}
+                      {run.videoUrl&&<div style={{ fontSize:10, color:"#16a34a", marginTop:2 }}>🎥 Video linked</div>}
                     </div>
                     <div style={{ display:"flex", gap:4, flexShrink:0, marginLeft:6 }}>
                       <button type="button" onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); setRunResultForm({...run}); setEditingRunResultIdx(idx); setShowRunResultForm(true); }} style={{ ...btnStyle("#7c3aed",true), padding:"2px 8px", fontSize:10 }}>Edit</button>
@@ -1181,13 +1178,19 @@ export default function App() {
                               {run.time&&<span style={{ fontSize:10, color:"#666" }}>⏱ {run.time}</span>}
                             </div>
                             {run.notes&&<div style={{ fontSize:10, color:"#888", marginTop:2, fontStyle:"italic" }}>{run.notes}</div>}
+                            {run.videoUrl&&(
+                              <button onClick={()=>window.open(run.videoUrl,"_blank")} style={{ display:"flex", alignItems:"center", gap:5, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"4px 10px", fontSize:11, cursor:"pointer", marginTop:4, fontWeight:"bold" }}>
+                                🎥 Watch Run {i+1} Video →
+                              </button>
+                            )}
                           </div>
                         ))}
                       </div>
                     )}
 
                     {r.photoUrl&&<img src={r.photoUrl} alt="ribbon" style={{ width:"100%", maxHeight:200, objectFit:"cover", borderRadius:8, marginTop:8 }}/>}
-                    {r.videoLink&&(
+                    {/* Legacy: competition-level videoLink on old records with no runs — show as fallback */}
+                    {r.videoLink && !(r.runs?.some(run=>run.videoUrl)) && (
                       <button onClick={()=>window.open(r.videoLink,"_blank")} style={{ display:"flex", alignItems:"center", gap:6, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"6px 12px", fontSize:12, cursor:"pointer", marginTop:8, fontWeight:"bold" }}>
                         🎥 Watch Run Video →
                       </button>
@@ -1411,7 +1414,7 @@ export default function App() {
                     {/* Odors — multi select */}
                     <label style={labelStyle}>Odor(s) — tap to select multiple</label>
                     <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:6 }}>
-                      {["Birch","Anise","Clove","Myrrh","Cypress","Vetiver"].map(o=>(
+                      {["Birch","Anise","Clove","Myrrh","Cypress","Vetiver","Unknown"].map(o=>(
                         <button type="button" key={o} onClick={()=>setRunForm({...runForm, odors:toggleMulti(runForm.odors,o)})} style={{
                           background: runForm.odors.includes(o)?"linear-gradient(135deg,#7c3aed,#06b6d4)":"#fff",
                           color: runForm.odors.includes(o)?"#fff":"#7c3aed",
@@ -1497,6 +1500,8 @@ export default function App() {
 
                     <label style={labelStyle}>Run Notes (optional)</label>
                     <input style={inputStyle} value={runForm.notes||""} onChange={e=>setRunForm({...runForm,notes:e.target.value})} placeholder="What happened on this run…"/>
+                    <label style={labelStyle}>🎥 Run Video Link (optional)</label>
+                    <input style={inputStyle} value={runForm.videoUrl||""} onChange={e=>setRunForm({...runForm,videoUrl:e.target.value})} placeholder="https://drive.google.com/… or YouTube URL"/>
 
                     <div style={{ display:"flex", gap:6, marginTop:8 }}>
                       <button type="button" onClick={(e)=>{e.preventDefault();e.stopPropagation();saveRun();}} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", fontSize:12, padding:"5px 14px" }}>
@@ -1520,6 +1525,7 @@ export default function App() {
                       </div>
                       {run.blindOutcome&&<div style={{ fontSize:11, color:"#555", fontStyle:"italic" }}>→ {run.blindOutcome}</div>}
                       {run.notes&&<div style={{ fontSize:11, color:"#888", marginTop:2 }}>{run.notes}</div>}
+                      {run.videoUrl&&<div style={{ fontSize:10, color:"#16a34a", marginTop:2 }}>🎥 Video linked</div>}
                     </div>
                     <div style={{ display:"flex", gap:4, flexShrink:0, marginLeft:6 }}>
                       <button type="button" onClick={()=>{ setRunForm({...run}); setEditingRunIdx(idx); setShowRunForm(true); }} style={{ ...btnStyle("#7c3aed",true), padding:"2px 8px", fontSize:10 }}>Edit</button>
@@ -1573,6 +1579,11 @@ export default function App() {
                               </div>
                               {run.blindOutcome&&<div style={{ fontSize:10, color:"#666", marginTop:2, fontStyle:"italic" }}>→ {run.blindOutcome}</div>}
                               {run.notes&&<div style={{ fontSize:10, color:"#888", marginTop:1 }}>{run.notes}</div>}
+                              {run.videoUrl&&(
+                                <button onClick={()=>window.open(run.videoUrl,"_blank")} style={{ display:"flex", alignItems:"center", gap:5, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"3px 10px", fontSize:11, cursor:"pointer", marginTop:4, fontWeight:"bold" }}>
+                                  🎥 Watch Run {i+1} →
+                                </button>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -1701,7 +1712,14 @@ function ResultRow({r}) {
         )}
       </div>
       {r.photoUrl&&<img src={r.photoUrl} alt="ribbon" style={{ width:"100%", maxHeight:160, objectFit:"cover", borderRadius:8, marginTop:8 }}/>}
-      {r.videoLink&&(
+      {/* Per-run video buttons */}
+      {r.runs?.map((run,i)=>run.videoUrl&&(
+        <button key={i} onClick={()=>window.open(run.videoUrl,"_blank")} style={{ display:"flex", alignItems:"center", gap:6, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"5px 10px", fontSize:11, cursor:"pointer", marginTop:6, fontWeight:"bold" }}>
+          🎥 Watch Run {i+1} →
+        </button>
+      ))}
+      {/* Legacy fallback: competition-level videoLink on old records */}
+      {r.videoLink && !(r.runs?.some(run=>run.videoUrl)) && (
         <button onClick={()=>window.open(r.videoLink,"_blank")} style={{ display:"flex", alignItems:"center", gap:6, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"5px 10px", fontSize:11, cursor:"pointer", marginTop:6, fontWeight:"bold" }}>
           🎥 Watch Run →
         </button>
