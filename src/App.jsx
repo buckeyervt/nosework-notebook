@@ -1116,7 +1116,7 @@ export default function App() {
                       </div>}
                       {entriesClosed&&!isPast&&<div style={{ fontSize:11, color:"#bbb", marginTop:2 }}>🔴 Entries Closed</div>}
                       {/* Enter Now — only show if entries are open and not yet closed */}
-                      {status==="none" && t.entryLink && !entriesClosed && !isPast && (
+                      {status==="none" && t.entryLink && !entriesClosed && !isPast && (!t.entryOpens || t.entryOpens <= todayStr) && (
                         <button onClick={()=>window.open(t.entryLink,"_blank")} style={{
                           background:"linear-gradient(135deg,#7c3aed,#06b6d4)", color:"#fff",
                           border:"none", borderRadius:20, padding:"5px 16px", fontSize:11,
