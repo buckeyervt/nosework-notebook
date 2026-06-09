@@ -32,8 +32,18 @@ const TABS = ["Dashboard", "Trials", "Results", "Titles", "Training", "My Dogs",
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.4";
+const APP_VERSION = "1.5";
 const WHATS_NEW = [
+  {
+    version: "1.5",
+    date: "June 2026",
+    title: "Collapsible Results",
+    items: [
+      "📋 Results page is now collapsible — each competition collapses to a summary showing the trial name, org, date, run results, and your overall notes.",
+      "⊕ Expand All / ⊖ Collapse All button at the top to manage the whole list at once.",
+      "🎮 Game runs show as a count badge in the collapsed summary, non-game runs show individual pass/fail chips.",
+    ],
+  },
   {
     version: "1.4",
     date: "June 2026",
@@ -122,6 +132,7 @@ export default function App() {
 
   // ── UI ───────────────────────────────────────────────────────
   const [filterOrg, setFilterOrg]           = useState("All");
+  const [expandedResults, setExpandedResults] = useState(new Set());
   const [showResultForm, setShowResultForm] = useState(false);
   const [resultForm, setResultForm]         = useState({ org:"NACSW", trial:"", date:"", title:"", notes:"", videoLink:"", runs:[] });
   const [resultPhotoFile, setResultPhotoFile] = useState(null);
@@ -1424,61 +1435,117 @@ export default function App() {
             )}
 
             {/* Results list */}
-            {(filterOrg==="All"?myEventResults:myEventResults.filter(r=>r.org===filterOrg)).slice().reverse().map(r=>(
-              <div key={r.id} style={{ background:ORG_BG[r.org]||"#fff", borderRadius:12, padding:14, marginBottom:10, borderLeft:`5px solid ${ORG_COLORS[r.org]}` }}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
-                  <div style={{ flex:1, marginRight:8 }}>
-                    <div style={{ fontWeight:"bold", fontSize:14 }}>{r.trial}</div>
-                    <div style={{ fontSize:12, color:"#888", marginTop:2 }}><OrgBadge org={r.org}/> · {r.date}</div>
-                    {r.title&&<div style={{ fontSize:12, color:"#e07b39", fontWeight:"bold", marginTop:3 }}>🏆 {r.title}</div>}
-                    {r.notes&&<div style={{ fontSize:12, color:"#777", marginTop:4, fontStyle:"italic" }}>{r.notes}</div>}
-
-                    {/* Runs */}
-                    {(r.runs?.length>0) && (
-                      <div style={{ marginTop:8 }}>
-                        {r.runs.map((run,i)=>(
-                          <div key={i} style={{ background:"rgba(255,255,255,0.7)", borderRadius:8, padding:"6px 10px", marginBottom:4, border:"1px solid rgba(0,0,0,0.06)" }}>
-                            <div style={{ display:"flex", gap:4, flexWrap:"wrap", alignItems:"center" }}>
-                              <span style={{ fontSize:11, color:"#888" }}>Run {i+1}:</span>
-                              <span style={{ background:"#ede9fe", color:"#7c3aed", borderRadius:20, padding:"1px 8px", fontSize:10, fontWeight:"bold" }}>{run.element}</span>
-                              <span style={{ background: run.result==="Pass"?"#e8f8ee":"#ffeaea", color: run.result==="Pass"?"#27ae60":"#c0392b", borderRadius:20, padding:"1px 8px", fontSize:10, fontWeight:"bold" }}>{run.result}</span>
-                              {run.level&&<span style={{ background:"#f0f9ff", color:"#0369a1", borderRadius:20, padding:"1px 8px", fontSize:10 }}>{run.level}</span>}
-                              {run.isGame&&<span style={{ background:"#fef3c7", color:"#b45309", borderRadius:20, padding:"1px 8px", fontSize:10 }}>🎮 {run.gameName||"Game"}</span>}
-                              {run.place&&<span style={{ fontSize:10, color:"#555", fontWeight:"bold" }}>📊 {run.place}{run.outOf?` of ${run.outOf}`:""}</span>}
-                              {run.time&&<span style={{ fontSize:10, color:"#666" }}>⏱ {run.time}</span>}
-                            </div>
-                            {run.notes&&<div style={{ fontSize:10, color:"#888", marginTop:2, fontStyle:"italic" }}>{run.notes}</div>}
-                            {run.videoUrl&&(
-                              <button onClick={()=>window.open(run.videoUrl,"_blank")} style={{ display:"flex", alignItems:"center", gap:5, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"4px 10px", fontSize:11, cursor:"pointer", marginTop:4, fontWeight:"bold" }}>
-                                🎥 Watch Run {i+1} Video →
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {r.photoUrl&&<img src={r.photoUrl} alt="ribbon" style={{ width:"100%", maxHeight:200, objectFit:"cover", borderRadius:8, marginTop:8 }}/>}
-                    {r.certificateUrl&&(
-                      <div style={{ marginTop:8 }}>
-                        <div style={{ fontSize:11, color:"#b45309", fontWeight:"bold", marginBottom:4 }}>🏅 Title Certificate</div>
-                        <img src={r.certificateUrl} alt="certificate" style={{ width:"100%", maxHeight:400, objectFit:"contain", borderRadius:8, border:"2px solid #fcd34d", background:"#fffbeb" }}/>
-                      </div>
-                    )}
-                    {/* Legacy: competition-level videoLink on old records with no runs — show as fallback */}
-                    {r.videoLink && !(r.runs?.some(run=>run.videoUrl)) && (
-                      <button onClick={()=>window.open(r.videoLink,"_blank")} style={{ display:"flex", alignItems:"center", gap:6, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"6px 12px", fontSize:12, cursor:"pointer", marginTop:8, fontWeight:"bold" }}>
-                        🎥 Watch Run Video →
-                      </button>
-                    )}
-                  </div>
-                  <div style={{ display:"flex", gap:6, flexShrink:0 }}>
-                    <button onClick={()=>startEditResult(r)} style={{ ...btnStyle("#7c3aed",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
-                    <button onClick={()=>deleteResult(r.id)} style={{ ...btnStyle("#c0392b",true), padding:"3px 10px", fontSize:11 }}>Del</button>
-                  </div>
-                </div>
+            {myEventResults.length > 0 && (
+              <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:8 }}>
+                <button onClick={()=>{
+                  const filtered = filterOrg==="All" ? myEventResults : myEventResults.filter(r=>r.org===filterOrg);
+                  const allExpanded = filtered.every(r=>expandedResults.has(r.id));
+                  if (allExpanded) {
+                    setExpandedResults(prev => { const n = new Set(prev); filtered.forEach(r=>n.delete(r.id)); return n; });
+                  } else {
+                    setExpandedResults(prev => { const n = new Set(prev); filtered.forEach(r=>n.add(r.id)); return n; });
+                  }
+                }} style={{ fontSize:11, color:"#7c3aed", background:"#f5f3ff", border:"1px solid #e9d5ff", borderRadius:20, padding:"4px 12px", cursor:"pointer" }}>
+                  {(() => {
+                    const filtered = filterOrg==="All" ? myEventResults : myEventResults.filter(r=>r.org===filterOrg);
+                    return filtered.every(r=>expandedResults.has(r.id)) ? "⊖ Collapse All" : "⊕ Expand All";
+                  })()}
+                </button>
               </div>
-            ))}
+            )}
+            {(filterOrg==="All"?myEventResults:myEventResults.filter(r=>r.org===filterOrg)).slice().reverse().map(r=>{
+              const isExpanded = expandedResults.has(r.id);
+              const toggleExpand = () => setExpandedResults(prev => { const n = new Set(prev); isExpanded ? n.delete(r.id) : n.add(r.id); return n; });
+              const nonGameRuns = (r.runs||[]).filter(run=>!run.isGame);
+              const gameRuns = (r.runs||[]).filter(run=>run.isGame);
+              return (
+                <div key={r.id} style={{ background:ORG_BG[r.org]||"#fff", borderRadius:12, marginBottom:10, borderLeft:`5px solid ${ORG_COLORS[r.org]}`, overflow:"hidden" }}>
+                  {/* ── Collapsed header — always visible ── */}
+                  <div onClick={toggleExpand} style={{ padding:"12px 14px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", marginBottom:2 }}>
+                        <span style={{ fontWeight:"bold", fontSize:14, color:"#1e1b4b" }}>{r.trial}</span>
+                        {r.title && <span style={{ fontSize:11, color:"#e07b39", fontWeight:"bold" }}>🏆 {r.title}</span>}
+                      </div>
+                      <div style={{ fontSize:11, color:"#888", marginBottom: nonGameRuns.length>0||r.notes ? 5 : 0 }}>
+                        <OrgBadge org={r.org}/> · {r.date}
+                      </div>
+                      {/* Non-game run summary chips */}
+                      {nonGameRuns.length > 0 && (
+                        <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginBottom: r.notes ? 4 : 0 }}>
+                          {nonGameRuns.map((run,i) => (
+                            <span key={i} style={{ background: run.result==="Pass"?"#e8f8ee":"#ffeaea", color: run.result==="Pass"?"#27ae60":"#c0392b", borderRadius:20, padding:"1px 8px", fontSize:10, fontWeight:"bold" }}>
+                              {run.element} {run.result==="Pass"?"✓":"✗"}
+                            </span>
+                          ))}
+                          {gameRuns.length > 0 && (
+                            <span style={{ background:"#fef3c7", color:"#b45309", borderRadius:20, padding:"1px 8px", fontSize:10, fontWeight:"bold" }}>
+                              🎮 {gameRuns.length} game{gameRuns.length>1?"s":""}
+                            </span>
+                          )}
+                          {nonGameRuns.length > 0 && (
+                            <span style={{ background:"#f5f3ff", color:"#7c3aed", borderRadius:20, padding:"1px 8px", fontSize:10, fontWeight:"bold" }}>
+                              {nonGameRuns.filter(run=>run.result==="Pass").length}/{nonGameRuns.length} Q
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {/* Overall notes preview when collapsed */}
+                      {!isExpanded && r.notes && (
+                        <div style={{ fontSize:11, color:"#777", fontStyle:"italic", marginTop:2 }}>{r.notes}</div>
+                      )}
+                    </div>
+                    <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
+                      <button onClick={e=>{e.stopPropagation();startEditResult(r);}} style={{ ...btnStyle("#7c3aed",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
+                      <button onClick={e=>{e.stopPropagation();deleteResult(r.id);}} style={{ ...btnStyle("#c0392b",true), padding:"3px 10px", fontSize:11 }}>Del</button>
+                      <span style={{ fontSize:14, color:"#bbb", marginLeft:2 }}>{isExpanded ? "▲" : "▼"}</span>
+                    </div>
+                  </div>
+
+                  {/* ── Expanded detail ── */}
+                  {isExpanded && (
+                    <div style={{ padding:"0 14px 14px" }}>
+                      {r.notes && <div style={{ fontSize:12, color:"#777", marginBottom:8, fontStyle:"italic" }}>{r.notes}</div>}
+                      {(r.runs?.length>0) && (
+                        <div>
+                          {r.runs.map((run,i)=>(
+                            <div key={i} style={{ background:"rgba(255,255,255,0.7)", borderRadius:8, padding:"6px 10px", marginBottom:4, border:"1px solid rgba(0,0,0,0.06)" }}>
+                              <div style={{ display:"flex", gap:4, flexWrap:"wrap", alignItems:"center" }}>
+                                <span style={{ fontSize:11, color:"#888" }}>Run {i+1}:</span>
+                                <span style={{ background:"#ede9fe", color:"#7c3aed", borderRadius:20, padding:"1px 8px", fontSize:10, fontWeight:"bold" }}>{run.element}</span>
+                                <span style={{ background: run.result==="Pass"?"#e8f8ee":"#ffeaea", color: run.result==="Pass"?"#27ae60":"#c0392b", borderRadius:20, padding:"1px 8px", fontSize:10, fontWeight:"bold" }}>{run.result}</span>
+                                {run.level&&<span style={{ background:"#f0f9ff", color:"#0369a1", borderRadius:20, padding:"1px 8px", fontSize:10 }}>{run.level}</span>}
+                                {run.isGame&&<span style={{ background:"#fef3c7", color:"#b45309", borderRadius:20, padding:"1px 8px", fontSize:10 }}>🎮 {run.gameName||"Game"}</span>}
+                                {run.place&&<span style={{ fontSize:10, color:"#555", fontWeight:"bold" }}>📊 {run.place}{run.outOf?` of ${run.outOf}`:""}</span>}
+                                {run.time&&<span style={{ fontSize:10, color:"#666" }}>⏱ {run.time}</span>}
+                              </div>
+                              {run.notes&&<div style={{ fontSize:10, color:"#888", marginTop:2, fontStyle:"italic" }}>{run.notes}</div>}
+                              {run.videoUrl&&(
+                                <button onClick={()=>window.open(run.videoUrl,"_blank")} style={{ display:"flex", alignItems:"center", gap:5, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"4px 10px", fontSize:11, cursor:"pointer", marginTop:4, fontWeight:"bold" }}>
+                                  🎥 Watch Run {i+1} Video →
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {r.photoUrl&&<img src={r.photoUrl} alt="ribbon" style={{ width:"100%", maxHeight:200, objectFit:"cover", borderRadius:8, marginTop:8 }}/>}
+                      {r.certificateUrl&&(
+                        <div style={{ marginTop:8 }}>
+                          <div style={{ fontSize:11, color:"#b45309", fontWeight:"bold", marginBottom:4 }}>🏅 Title Certificate</div>
+                          <img src={r.certificateUrl} alt="certificate" style={{ width:"100%", maxHeight:400, objectFit:"contain", borderRadius:8, border:"2px solid #fcd34d", background:"#fffbeb" }}/>
+                        </div>
+                      )}
+                      {r.videoLink && !(r.runs?.some(run=>run.videoUrl)) && (
+                        <button onClick={()=>window.open(r.videoLink,"_blank")} style={{ display:"flex", alignItems:"center", gap:6, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"6px 12px", fontSize:12, cursor:"pointer", marginTop:8, fontWeight:"bold" }}>
+                          🎥 Watch Run Video →
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
             {myEventResults.length===0&&<div style={{ color:"#bbb", fontSize:13, textAlign:"center", marginTop:30 }}>No results logged yet!</div>}
           </div>
         )}
