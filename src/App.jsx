@@ -41,6 +41,7 @@ const WHATS_NEW = [
     items: [
       "📋 Results page is now collapsible — each competition collapses to a summary showing the trial name, org, date, run results, and your overall notes.",
       "⊕ Expand All / ⊖ Collapse All button at the top to manage the whole list at once.",
+      "▼ Tap anywhere on a result card (or the ▲▼ triangle) to expand or collapse that individual competition.",
       "🎮 Game runs show as a count badge in the collapsed summary, non-game runs show individual pass/fail chips.",
     ],
   },
