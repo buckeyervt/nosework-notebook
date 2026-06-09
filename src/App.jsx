@@ -32,8 +32,17 @@ const TABS = ["Dashboard", "Trials", "Results", "Titles", "Training", "My Dogs",
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.3";
+const APP_VERSION = "1.4";
 const WHATS_NEW = [
+  {
+    version: "1.4",
+    date: "June 2026",
+    title: "Title Certificates & Titles Page Editing",
+    items: [
+      "🏅 Upload your title certificate photo when logging a result — appears in both the Results and Titles tabs.",
+      "✏️ Titles page now has Edit and Delete buttons on each title so you can update info or add a certificate to an existing title.",
+    ],
+  },
   {
     version: "1.3",
     date: "June 2026",
@@ -116,6 +125,7 @@ export default function App() {
   const [showResultForm, setShowResultForm] = useState(false);
   const [resultForm, setResultForm]         = useState({ org:"NACSW", trial:"", date:"", title:"", notes:"", videoLink:"", runs:[] });
   const [resultPhotoFile, setResultPhotoFile] = useState(null);
+  const [certificatePhotoFile, setCertificatePhotoFile] = useState(null);
   const [editingResultId, setEditingResultId] = useState(null);
   const [showRunResultForm, setShowRunResultForm] = useState(false);
   const [runResultForm, setRunResultForm]   = useState({ element:"Interior", level:"", result:"Pass", isGame:false, gameName:"", place:"", outOf:"", time:"", notes:"" });
@@ -474,19 +484,28 @@ export default function App() {
         photoUrl = await getDownloadURL(storageRef);
       } catch (err) { console.error("Ribbon photo error:", err); }
     }
+    let certificateUrl = editingResultId ? (allResults[activeDog.id]?.find(r=>r.id===editingResultId)?.certificateUrl||"") : "";
+    if (certificatePhotoFile) {
+      try {
+        const storageRef = ref(storage, `certificates/${user.uid}/${Date.now()}`);
+        await uploadBytes(storageRef, certificatePhotoFile);
+        certificateUrl = await getDownloadURL(storageRef);
+      } catch (err) { console.error("Certificate photo error:", err); }
+    }
     if (editingResultId) {
-      const newResults = { ...allResults, [activeDog.id]: (allResults[activeDog.id]||[]).map(r => r.id===editingResultId ? {...resultForm, id:editingResultId, photoUrl} : r) };
+      const newResults = { ...allResults, [activeDog.id]: (allResults[activeDog.id]||[]).map(r => r.id===editingResultId ? {...resultForm, id:editingResultId, photoUrl, certificateUrl} : r) };
       setAllResults(newResults);
       setEditingResultId(null);
       await saveUserData({ results: newResults });
     } else {
-      const newResult = { ...resultForm, id: Date.now().toString(), photoUrl };
+      const newResult = { ...resultForm, id: Date.now().toString(), photoUrl, certificateUrl };
       const newResults = { ...allResults, [activeDog.id]: [...(allResults[activeDog.id]||[]), newResult] };
       setAllResults(newResults);
       await saveUserData({ results: newResults });
     }
     setShowResultForm(false);
     setResultPhotoFile(null);
+    setCertificatePhotoFile(null);
     setResultForm(blankResultForm());
     setRunResultForm(blankRunResultForm());
     setShowRunResultForm(false);
@@ -499,6 +518,8 @@ export default function App() {
     setShowResultForm(true);
     setShowRunResultForm(false);
     setEditingRunResultIdx(null);
+    setResultPhotoFile(null);
+    setCertificatePhotoFile(null);
     window.scrollTo(0,0);
   }
 
@@ -633,7 +654,7 @@ export default function App() {
   const upcoming     = trials.filter(t => t.date >= todayStr);
   const deadlineSoon = trials.filter(t => { if (!t.entryDeadline) return false; const d = Math.ceil((new Date(t.entryDeadline+"T12:00:00") - today)/86400000); return d>=0&&d<=14&&getStatus(t.id)==="none"; });
   const opensSoon    = trials.filter(t => { if (!t.entryOpens) return false; const d = Math.ceil((new Date(t.entryOpens+"T12:00:00") - today)/86400000); return d>=0&&d<=7&&getStatus(t.id)==="none"; });
-  const titlesEarned = myResults.filter(r=>r.title).map(r=>({org:r.org,title:r.title,date:r.date,trial:r.trial}));
+  const titlesEarned = myResults.filter(r=>r.title).map(r=>({id:r.id, org:r.org,title:r.title,date:r.date,trial:r.trial,certificateUrl:r.certificateUrl||""}));
   const trialsByView = trialView==="past" ? trials.filter(t=>t.date < todayStr) : trials.filter(t=>t.date >= todayStr);
   const filtered = filterOrg === "All" ? trialsByView
     : filterOrg === "Entered" ? trialsByView.filter(t => getStatus(t.id)==="entered" || getStatus(t.id)==="waitlist")
@@ -1223,6 +1244,40 @@ export default function App() {
                   )}
                 </div>
 
+                {/* Certificate — only shown when a title is entered */}
+                {resultForm.title && (
+                  <>
+                    <label style={labelStyle}>🏅 Title Certificate (optional)</label>
+                    <div style={{ border:"1px dashed #fcd34d", borderRadius:8, padding:10, background:"#fffbeb", marginBottom:4 }}>
+                      {certificatePhotoFile ? (
+                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <img src={URL.createObjectURL(certificatePhotoFile)} alt="certificate preview" style={{ width:60, height:60, objectFit:"cover", borderRadius:8 }}/>
+                          <div>
+                            <div style={{ fontSize:12, color:"#b45309", fontWeight:"bold" }}>{certificatePhotoFile.name}</div>
+                            <button type="button" onClick={()=>setCertificatePhotoFile(null)} style={{ fontSize:11, color:"#c0392b", background:"none", border:"none", cursor:"pointer", padding:0 }}>Remove</button>
+                          </div>
+                        </div>
+                      ) : (editingResultId && allResults[activeDog?.id]?.find(r=>r.id===editingResultId)?.certificateUrl) ? (
+                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <img src={allResults[activeDog.id].find(r=>r.id===editingResultId).certificateUrl} alt="certificate" style={{ width:60, height:60, objectFit:"cover", borderRadius:8 }}/>
+                          <div>
+                            <div style={{ fontSize:12, color:"#b45309" }}>Certificate uploaded</div>
+                            <label style={{ fontSize:11, color:"#7c3aed", cursor:"pointer", textDecoration:"underline" }}>
+                              Replace
+                              <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>setCertificatePhotoFile(e.target.files[0]||null)}/>
+                            </label>
+                          </div>
+                        </div>
+                      ) : (
+                        <label style={{ cursor:"pointer", display:"flex", alignItems:"center", gap:8, fontSize:13, color:"#b45309" }}>
+                          <span style={{ fontSize:20 }}>🏅</span> Tap to add certificate photo
+                          <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>setCertificatePhotoFile(e.target.files[0]||null)}/>
+                        </label>
+                      )}
+                    </div>
+                  </>
+                )}
+
                 {/* Video link moved to per-run level */}
 
                 {/* ── RUNS ── */}
@@ -1370,6 +1425,12 @@ export default function App() {
                     )}
 
                     {r.photoUrl&&<img src={r.photoUrl} alt="ribbon" style={{ width:"100%", maxHeight:200, objectFit:"cover", borderRadius:8, marginTop:8 }}/>}
+                    {r.certificateUrl&&(
+                      <div style={{ marginTop:8 }}>
+                        <div style={{ fontSize:11, color:"#b45309", fontWeight:"bold", marginBottom:4 }}>🏅 Title Certificate</div>
+                        <img src={r.certificateUrl} alt="certificate" style={{ width:"100%", maxHeight:220, objectFit:"cover", borderRadius:8, border:"2px solid #fcd34d" }}/>
+                      </div>
+                    )}
                     {/* Legacy: competition-level videoLink on old records with no runs — show as fallback */}
                     {r.videoLink && !(r.runs?.some(run=>run.videoUrl)) && (
                       <button onClick={()=>window.open(r.videoLink,"_blank")} style={{ display:"flex", alignItems:"center", gap:6, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"6px 12px", fontSize:12, cursor:"pointer", marginTop:8, fontWeight:"bold" }}>
@@ -1425,15 +1486,24 @@ export default function App() {
                   {orgTitles.length===0
                     ? <div style={{ color:"#ccc", fontSize:13 }}>No titles yet — you've got this! 🐕</div>
                     : orgTitles.map((t,i)=>(
-                        <div key={i} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6, background:"rgba(255,255,255,0.6)", borderRadius:8, padding:"8px 12px" }}>
-                          <span style={{ fontSize:20 }}>🏅</span>
-                          <div>
-                            <div style={{ fontWeight:"bold" }}>{t.title}</div>
-                            <div style={{ fontSize:11, color:"#888" }}>
-                              {t.trial}{t.trial && t.date ? " · " : ""}{t.date}
-                              {t.trial==="Pre-app title" && !t.date ? <span style={{ color:"#bbb" }}> · manually entered</span> : ""}
+                        <div key={i} style={{ marginBottom:6, background:"rgba(255,255,255,0.6)", borderRadius:8, padding:"8px 12px" }}>
+                          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                            <span style={{ fontSize:20 }}>🏅</span>
+                            <div style={{ flex:1 }}>
+                              <div style={{ fontWeight:"bold" }}>{t.title}</div>
+                              <div style={{ fontSize:11, color:"#888" }}>
+                                {t.trial}{t.trial && t.date ? " · " : ""}{t.date}
+                                {t.trial==="Pre-app title" && !t.date ? <span style={{ color:"#bbb" }}> · manually entered</span> : ""}
+                              </div>
+                            </div>
+                            <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+                              <button onClick={()=>{ const full = myResults.find(r=>r.id===t.id); if(full) startEditResult(full); setTab("Results"); }} style={{ ...btnStyle("#7c3aed",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
+                              <button onClick={()=>deleteResult(t.id)} style={{ ...btnStyle("#c0392b",true), padding:"3px 10px", fontSize:11 }}>Del</button>
                             </div>
                           </div>
+                          {t.certificateUrl && (
+                            <img src={t.certificateUrl} alt="certificate" style={{ width:"100%", maxHeight:200, objectFit:"cover", borderRadius:8, marginTop:8, border:"2px solid #fcd34d" }}/>
+                          )}
                         </div>
                       ))
                   }
