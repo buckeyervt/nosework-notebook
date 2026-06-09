@@ -3,7 +3,7 @@ import { db } from "./firebase";
 import { MASTER_TRIALS } from "./trials";
 import {
   collection, doc, setDoc, deleteDoc, onSnapshot,
-  writeBatch, getDoc, getDocs
+  writeBatch, getDoc, getDocs, addDoc, arrayUnion, arrayRemove, serverTimestamp
 } from "firebase/firestore";
 import {
   getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
@@ -27,13 +27,23 @@ const ORG_IDS = [
 ];
 
 const auth = getAuth();
-const TABS = ["Dashboard", "Trials", "Results", "Titles", "Training", "My Dogs", "Account"];
+const TABS = ["Dashboard", "Trials", "Results", "Titles", "Training", "My Dogs", "Account", "Ideas 💡"];
 
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.2";
+const APP_VERSION = "1.3";
 const WHATS_NEW = [
+  {
+    version: "1.3",
+    date: "June 2026",
+    title: "Ideas Board, Premiums & What's New",
+    items: [
+      "💡 Ideas & Feature Requests tab — submit ideas, vote on others, and watch Tina move them through the pipeline (Open → In Development → Released).",
+      "📄 Trial premiums — each trial can now have a link to its premium or info document, visible even after entries close.",
+      "✨ What's New button in the header so you can always re-read recent updates.",
+    ],
+  },
   {
     version: "1.2",
     date: "June 2026",
@@ -86,8 +96,14 @@ export default function App() {
   // ── What's New ───────────────────────────────────────────────
   const [showWhatsNew, setShowWhatsNew]   = useState(false);
   const [whatsNewSeen, setWhatsNewSeen]   = useState(() => localStorage.getItem("nwn_seen_version") || "");
+  // ── Feature requests ─────────────────────────────────────────
+  const [featureRequests, setFeatureRequests] = useState([]);
+  const [ideaText, setIdeaText]           = useState("");
+  const [ideaSubmitting, setIdeaSubmitting] = useState(false);
+  const [adminIdeaComment, setAdminIdeaComment] = useState({});  // { [id]: string }
+  const [adminIdeaStatus, setAdminIdeaStatus]   = useState({});  // { [id]: string }
   const [adminTab, setAdminTab]           = useState("list");
-  const [trialForm, setTrialForm]         = useState({ org:"NACSW", name:"", date:"", location:"", level:"", entryOpens:"", entryDeadline:"", entryLink:"", notes:"", adminNotes:"", needsInfo:false });
+  const [trialForm, setTrialForm]         = useState({ org:"NACSW", name:"", date:"", location:"", level:"", entryOpens:"", entryDeadline:"", entryLink:"", premiumLink:"", notes:"", adminNotes:"", needsInfo:false });
   const [adminFilter, setAdminFilter]     = useState("all"); // all | needsinfo
   const [quickEditId, setQuickEditId]     = useState(null);
   const [quickEditLink, setQuickEditLink] = useState("");
@@ -154,6 +170,16 @@ export default function App() {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => new Date(a.date)-new Date(b.date));
       setTrials(data); setTrialsLoading(false);
     }, () => { setTrials(MASTER_TRIALS); setTrialsLoading(false); });
+    return () => unsub();
+  }, []);
+
+  // ── Feature requests (real-time) ─────────────────────────────
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "featureRequests"), snap => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (b.votes?.length || 0) - (a.votes?.length || 0));
+      setFeatureRequests(data);
+    }, () => {});
     return () => unsub();
   }, []);
 
@@ -249,6 +275,45 @@ export default function App() {
     localStorage.setItem("nwn_seen_version", APP_VERSION);
     setWhatsNewSeen(APP_VERSION);
     setShowWhatsNew(false);
+  }
+
+  // ── Feature requests ─────────────────────────────────────────
+  const myOpenIdeas = featureRequests.filter(r => r.submittedByUid === user?.uid && r.status === "open");
+  async function submitIdea(e) {
+    e.preventDefault();
+    if (!ideaText.trim() || !user) return;
+    if (myOpenIdeas.length >= 5) { alert("You've used all 5 idea slots! Your ideas free up once Tina reviews them."); return; }
+    setIdeaSubmitting(true);
+    try {
+      await addDoc(collection(db, "featureRequests"), {
+        text: ideaText.trim(),
+        submittedBy: user.displayName?.split(" ")[0] || "Someone",
+        submittedByUid: user.uid,
+        votes: [user.uid],
+        status: "open",
+        adminComment: "",
+        createdAt: serverTimestamp(),
+      });
+      setIdeaText("");
+    } catch (err) { alert("Couldn't submit — please try again."); }
+    setIdeaSubmitting(false);
+  }
+  async function toggleVote(idea) {
+    if (!user) return;
+    const hasVoted = idea.votes?.includes(user.uid);
+    // Can't unvote your own submission
+    if (hasVoted && idea.submittedByUid === user.uid) return;
+    await setDoc(doc(db, "featureRequests", idea.id), {
+      votes: hasVoted ? arrayRemove(user.uid) : arrayUnion(user.uid)
+    }, { merge: true });
+  }
+  async function deleteIdea(id) {
+    await deleteDoc(doc(db, "featureRequests", id));
+  }
+  async function saveAdminIdeaStatus(idea) {
+    const status = adminIdeaStatus[idea.id] ?? idea.status;
+    const comment = adminIdeaComment[idea.id] ?? idea.adminComment ?? "";
+    await setDoc(doc(db, "featureRequests", idea.id), { status, adminComment: comment }, { merge: true });
   }
 
   // ── Account management ───────────────────────────────────────
@@ -722,8 +787,9 @@ export default function App() {
         ) : (
           <div>
             <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
-              {[["list","📋 All Trials"],["add","➕ Add Trial"],["seed","🚀 Seed DB"]].map(([t,l]) => (
-                <button key={t} onClick={()=>{setAdminTab(t);if(t!=="add"){setEditingTrialId(null);setTrialForm({org:"NACSW",name:"",date:"",location:"",level:"",entryOpens:"",entryDeadline:"",entryLink:"",notes:"",adminNotes:"",needsInfo:false});}}}
+              {[["list","📋 All Trials"],["add","➕ Add Trial"],["seed","🚀 Seed DB"],["ideas","💡 Ideas"]].map(([t,l]) => (
+                <button key={t} onClick={()=>{setAdminTab(t);if(t!=="add"){setEditingTrialId(null);setTrialForm({org:"NACSW",name:"",date:"",location:"",level:"",entryOpens:"",entryDeadline:"",entryLink:"",premiumLink:"",notes:"",adminNotes:"",needsInfo:false});}}}
+
                   style={{ ...btnStyle(adminTab===t?"#7c3aed":"#aaa"), padding:"6px 14px", fontSize:13, ...(adminTab===t?{background:"linear-gradient(135deg,#7c3aed,#06b6d4)"}:{}) }}>{l}</button>
               ))}
             </div>
@@ -753,6 +819,8 @@ export default function App() {
                 <input style={inputStyle} value={trialForm.location} onChange={e=>setTrialForm({...trialForm,location:e.target.value})} placeholder="Venue, City, TX" />
                 <label style={labelStyle}>Entry Link (URL)</label>
                 <input style={inputStyle} value={trialForm.entryLink||""} onChange={e=>setTrialForm({...trialForm,entryLink:e.target.value})} placeholder="https://secreterrier.com/events/..." />
+                <label style={labelStyle}>Premium / Info Document (URL)</label>
+                <input style={inputStyle} value={trialForm.premiumLink||""} onChange={e=>setTrialForm({...trialForm,premiumLink:e.target.value})} placeholder="https://… (premium, flyer, or info sheet)" />
                 <label style={labelStyle}>Public Notes <span style={{ color:"#aaa", fontWeight:"normal" }}>(everyone sees this)</span></label>
                 <textarea style={{...inputStyle,height:56}} value={trialForm.notes} onChange={e=>setTrialForm({...trialForm,notes:e.target.value})} placeholder="Contact email, special info, full/waitlist status…" />
                 <label style={labelStyle}>🔒 Admin Notes <span style={{ color:"#aaa", fontWeight:"normal" }}>(only you see this)</span></label>
@@ -768,6 +836,64 @@ export default function App() {
                 <div style={formTitle}>🚀 Seed Database</div>
                 <p style={{ fontSize:13, color:"#666" }}>Run once when first setting up. Uploads all {MASTER_TRIALS.length} trials.</p>
                 <button onClick={seedTrials} style={{ ...btnStyle("#c0392b"), marginTop:8 }}>Upload {MASTER_TRIALS.length} Trials to Firebase</button>
+              </div>
+            )}
+            {adminTab==="ideas"&&(
+              <div>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+                  <div style={{ fontWeight:"bold", fontSize:14, color:"#5b21b6" }}>💡 Feature Requests ({featureRequests.length})</div>
+                  <div style={{ fontSize:12, color:"#888" }}>
+                    Open: {featureRequests.filter(r=>r.status==="open").length}
+                  </div>
+                </div>
+                {featureRequests.length===0 && <div style={{ color:"#bbb", fontSize:13 }}>No ideas submitted yet.</div>}
+                {featureRequests.map(idea => {
+                  const statusVal = adminIdeaStatus[idea.id] ?? idea.status ?? "open";
+                  const commentVal = adminIdeaComment[idea.id] ?? idea.adminComment ?? "";
+                  const statusMeta = {
+                    open:      { label:"💬 Open",          bg:"#f5f3ff", color:"#7c3aed", border:"#e9d5ff" },
+                    "in-dev":  { label:"🔧 In Development", bg:"#eff6ff", color:"#1d4ed8", border:"#93c5fd" },
+                    released:  { label:"✅ Released",       bg:"#e8f8ee", color:"#15803d", border:"#86efac" },
+                    exists:    { label:"💡 Already Exists", bg:"#fef9c3", color:"#854d0e", border:"#fde047" },
+                    declined:  { label:"❌ Declined",       bg:"#fef2f2", color:"#b91c1c", border:"#fca5a5" },
+                  };
+                  const sm = statusMeta[statusVal] || statusMeta.open;
+                  return (
+                    <div key={idea.id} style={{ background:"#fff", borderRadius:12, padding:14, marginBottom:10, border:`1px solid ${sm.border}`, borderLeft:`4px solid ${sm.color}` }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+                        <div style={{ flex:1, marginRight:8 }}>
+                          <div style={{ fontSize:13, fontWeight:"bold", color:"#1e1b4b", marginBottom:3 }}>{idea.text}</div>
+                          <div style={{ fontSize:11, color:"#888" }}>
+                            by {idea.submittedBy} · 👍 {idea.votes?.length || 0} votes
+                            {idea.createdAt?.toDate && <span> · {idea.createdAt.toDate().toLocaleDateString("en-CA")}</span>}
+                          </div>
+                        </div>
+                        <button onClick={()=>deleteIdea(idea.id)} style={{ ...btnStyle("#c0392b",true), padding:"2px 8px", fontSize:10, flexShrink:0 }}>Del</button>
+                      </div>
+                      {/* Status selector */}
+                      <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:8 }}>
+                        {Object.entries(statusMeta).map(([key, meta]) => (
+                          <button key={key} type="button" onClick={()=>setAdminIdeaStatus(s=>({...s,[idea.id]:key}))} style={{
+                            background: statusVal===key ? meta.bg : "#f9fafb",
+                            color: statusVal===key ? meta.color : "#aaa",
+                            border: `1px solid ${statusVal===key ? meta.border : "#e5e7eb"}`,
+                            borderRadius:20, padding:"3px 10px", fontSize:10, cursor:"pointer", fontWeight: statusVal===key?"bold":"normal"
+                          }}>{meta.label}</button>
+                        ))}
+                      </div>
+                      {/* Comment field */}
+                      <input
+                        style={{ ...inputStyle, fontSize:12, marginBottom:6 }}
+                        placeholder="Admin comment (optional — shown to users)"
+                        value={commentVal}
+                        onChange={e=>setAdminIdeaComment(c=>({...c,[idea.id]:e.target.value}))}
+                      />
+                      <button onClick={()=>saveAdminIdeaStatus(idea)} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", padding:"5px 14px", fontSize:12 }}>
+                        Save
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
             {adminTab==="list"&&!editingTrialId&&(
@@ -841,7 +967,7 @@ export default function App() {
                         )}
                       </div>
                       <div style={{ display:"flex", gap:6, flexShrink:0 }}>
-                        <button onClick={()=>{setEditingTrialId(t.id);setTrialForm({...t,adminNotes:t.adminNotes||"",needsInfo:t.needsInfo||false,entryLink:t.entryLink||""});setAdminTab("add");window.scrollTo(0,0);}} style={{ ...btnStyle("#3a7bd5",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
+                        <button onClick={()=>{setEditingTrialId(t.id);setTrialForm({...t,adminNotes:t.adminNotes||"",needsInfo:t.needsInfo||false,entryLink:t.entryLink||"",premiumLink:t.premiumLink||""});setAdminTab("add");window.scrollTo(0,0);}} style={{ ...btnStyle("#3a7bd5",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
                         <button onClick={()=>deleteTrial(t.id)} style={{ ...btnStyle("#c0392b",true), padding:"3px 10px", fontSize:11 }}>Del</button>
                       </div>
                     </div>
@@ -876,9 +1002,9 @@ export default function App() {
             </div>
           </div>
           <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-            <button onClick={()=>setShowWhatsNew(true)} style={{ background:"transparent", border:"none", color:"rgba(255,255,255,0.75)", fontSize:20, cursor:"pointer", padding:4, position:"relative" }}>
-              🆕
-              {whatsNewSeen !== APP_VERSION && <span style={{ position:"absolute", top:2, right:2, width:8, height:8, background:"#f59e0b", borderRadius:"50%", border:"1px solid rgba(255,255,255,0.8)" }}/>}
+            <button onClick={()=>setShowWhatsNew(true)} style={{ background:"rgba(255,255,255,0.25)", border:"1px solid rgba(255,255,255,0.5)", color:"#fff", borderRadius:20, padding:"4px 10px", fontSize:12, fontWeight:"bold", cursor:"pointer", position:"relative", display:"flex", alignItems:"center", gap:5 }}>
+              ✨ What's New
+              {whatsNewSeen !== APP_VERSION && <span style={{ width:8, height:8, background:"#f59e0b", borderRadius:"50%", display:"inline-block", flexShrink:0 }}/>}
             </button>
             <button onClick={()=>setShowAdmin(true)} style={{ background:"transparent", border:"none", color:"rgba(255,255,255,0.75)", fontSize:20, cursor:"pointer", padding:4 }}>⚙️</button>
             <button onClick={handleLogout} style={{ background:"rgba(255,255,255,0.15)", border:"none", color:"#fff", borderRadius:8, padding:"4px 10px", fontSize:11, cursor:"pointer" }}>Sign out</button>
@@ -997,6 +1123,16 @@ export default function App() {
                           cursor:"pointer", fontWeight:"bold", marginTop:6, display:"inline-block"
                         }}>
                           🔗 Enter Now →
+                        </button>
+                      )}
+                      {/* Premium — always visible when set, even after entries close */}
+                      {t.premiumLink && (
+                        <button onClick={()=>window.open(t.premiumLink,"_blank")} style={{
+                          background:"#fff", color:"#7c3aed",
+                          border:"1px solid #e9d5ff", borderRadius:20, padding:"5px 16px", fontSize:11,
+                          cursor:"pointer", fontWeight:"bold", marginTop:6, display:"inline-block"
+                        }}>
+                          📄 Premium →
                         </button>
                       )}
                       {t.notes&&<div style={{ fontSize:11, color:"#999", marginTop:4, fontStyle:"italic" }}>{t.notes}</div>}
@@ -1715,6 +1851,98 @@ export default function App() {
             )}
           </div>
         )}
+
+        {/* IDEAS / FEATURE REQUESTS */}
+        {tab==="Ideas 💡" && (
+          <div>
+            <div style={{ fontWeight:"bold", fontSize:16, marginBottom:4, color:"#5b21b6" }}>💡 Ideas & Feature Requests</div>
+            <div style={{ fontSize:13, color:"#888", marginBottom:16 }}>
+              Got an idea to make NoseWork Notebook better? Submit it, vote on others, and watch it move through the pipeline.
+            </div>
+
+            {/* Slot counter */}
+            <div style={{ background: myOpenIdeas.length>=5 ? "#fef2f2" : "#f5f3ff", border:`1px solid ${myOpenIdeas.length>=5?"#fca5a5":"#e9d5ff"}`, borderRadius:10, padding:"10px 14px", marginBottom:16, fontSize:12, color: myOpenIdeas.length>=5?"#b91c1c":"#7c3aed" }}>
+              {myOpenIdeas.length>=5
+                ? "⚠️ You've used all 5 idea slots. Your slots free up once Tina reviews your open ideas."
+                : `💡 You have ${5 - myOpenIdeas.length} idea slot${5-myOpenIdeas.length===1?"":"s"} remaining`
+              }
+            </div>
+
+            {/* Submit form */}
+            {myOpenIdeas.length < 5 && (
+              <form onSubmit={submitIdea} style={{ ...formStyle, marginBottom:20 }}>
+                <div style={formTitle}>Submit an Idea</div>
+                <textarea
+                  required
+                  style={{ ...inputStyle, height:72, resize:"vertical" }}
+                  placeholder="Describe your idea clearly — what would it do and why would it help?"
+                  value={ideaText}
+                  onChange={e=>setIdeaText(e.target.value)}
+                  maxLength={300}
+                />
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:6 }}>
+                  <span style={{ fontSize:11, color:"#bbb" }}>{ideaText.length}/300</span>
+                  <button type="submit" disabled={ideaSubmitting||!ideaText.trim()} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", padding:"6px 18px", fontSize:12 }}>
+                    {ideaSubmitting ? "Submitting…" : "Submit Idea 💡"}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Ideas list */}
+            {featureRequests.length === 0
+              ? <div style={{ color:"#bbb", fontSize:13, textAlign:"center", marginTop:20 }}>No ideas yet — be the first! 🐾</div>
+              : featureRequests.map(idea => {
+                  const hasVoted = idea.votes?.includes(user.uid);
+                  const isOwn = idea.submittedByUid === user.uid;
+                  const statusMeta = {
+                    open:      { label:"Open for voting",   bg:"#f5f3ff", color:"#7c3aed", border:"#e9d5ff" },
+                    "in-dev":  { label:"🔧 In Development", bg:"#eff6ff", color:"#1d4ed8", border:"#93c5fd" },
+                    released:  { label:"✅ Released!",       bg:"#e8f8ee", color:"#15803d", border:"#86efac" },
+                    exists:    { label:"💡 Already Exists", bg:"#fef9c3", color:"#854d0e", border:"#fde047" },
+                    declined:  { label:"❌ Not Planned",    bg:"#fef2f2", color:"#b91c1c", border:"#fca5a5" },
+                  };
+                  const sm = statusMeta[idea.status] || statusMeta.open;
+                  return (
+                    <div key={idea.id} style={{ background:"#fff", borderRadius:12, padding:14, marginBottom:10, border:`1px solid ${sm.border}`, borderLeft:`4px solid ${sm.color}`, opacity: idea.status==="declined"?0.7:1 }}>
+                      <div style={{ display:"flex", gap:12, alignItems:"flex-start" }}>
+                        {/* Vote button */}
+                        <button
+                          onClick={()=>toggleVote(idea)}
+                          disabled={isOwn && hasVoted}
+                          style={{ flexShrink:0, display:"flex", flexDirection:"column", alignItems:"center", gap:2, background: hasVoted?"linear-gradient(135deg,#7c3aed,#06b6d4)":"#f5f3ff", color: hasVoted?"#fff":"#7c3aed", border:`1px solid ${hasVoted?"transparent":"#e9d5ff"}`, borderRadius:10, padding:"8px 10px", cursor: isOwn&&hasVoted?"default":"pointer", minWidth:44 }}
+                        >
+                          <span style={{ fontSize:16 }}>👍</span>
+                          <span style={{ fontSize:12, fontWeight:"bold" }}>{idea.votes?.length || 0}</span>
+                        </button>
+                        {/* Content */}
+                        <div style={{ flex:1 }}>
+                          <div style={{ fontSize:13, fontWeight:"bold", color:"#1e1b4b", marginBottom:4, lineHeight:1.4 }}>{idea.text}</div>
+                          <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center", marginBottom: idea.adminComment ? 6 : 0 }}>
+                            <span style={{ background:sm.bg, color:sm.color, border:`1px solid ${sm.border}`, borderRadius:20, padding:"2px 8px", fontSize:10, fontWeight:"bold" }}>{sm.label}</span>
+                            <span style={{ fontSize:11, color:"#bbb" }}>by {idea.submittedBy}</span>
+                            {isOwn && idea.status==="open" && (
+                              <button onClick={()=>deleteIdea(idea.id)} style={{ fontSize:10, color:"#e07b39", background:"none", border:"none", cursor:"pointer", padding:0, textDecoration:"underline" }}>withdraw</button>
+                            )}
+                          </div>
+                          {idea.adminComment && (
+                            <div style={{ fontSize:12, color:"#555", background:"#faf5ff", borderRadius:8, padding:"6px 10px", marginTop:6, borderLeft:"3px solid #7c3aed", fontStyle:"italic" }}>
+                              💬 {idea.adminComment}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+              })
+            }
+
+            <div style={{ textAlign:"center", fontSize:12, color:"#bbb", paddingBottom:8, marginTop:8 }}>
+              Thank you for helping make NoseWork Notebook better 🐾
+            </div>
+          </div>
+        )}
+
       </div>
 
       {/* ── What's New Modal ─────────────────────────────────── */}
