@@ -28,6 +28,34 @@ const ORG_IDS = [
 
 const auth = getAuth();
 const TABS = ["Dashboard", "Trials", "Results", "Titles", "Training", "My Dogs", "Account"];
+
+// ── What's New ───────────────────────────────────────────────
+// To add a release: prepend a new entry to this array and bump APP_VERSION.
+// Every user who hasn't seen the new version will get the modal automatically.
+const APP_VERSION = "1.2";
+const WHATS_NEW = [
+  {
+    version: "1.2",
+    date: "June 2026",
+    title: "Per-Run Videos & Training Improvements",
+    items: [
+      "🎥 Competition results — video links are now per run, not per competition. Add a video to each individual run when logging results.",
+      "🎥 Training runs — each training run now has its own optional video link too.",
+      "❓ Training odors — added Unknown option so you can log a run immediately and fill in the scent details later.",
+    ],
+  },
+  {
+    version: "1.1",
+    date: "April 2026",
+    title: "Trial Calendar & Registration",
+    items: [
+      "📅 Live trial calendar with 40 TX/OK/LA trials through Jan 2027.",
+      "✓ Track your registration status (Not In / Waitlist / Entered) and paid status per trial.",
+      "🔔 Dashboard alerts for entry deadlines and entries opening soon.",
+      "🔗 Enter Now button when entries are open.",
+    ],
+  },
+];
 const blankDog = () => ({ id: Date.now().toString(), callName:"", name:"", breed:"", dob:"", nacsw:"", akc:"", ukc:"", uscss:"" });
 
 export default function App() {
@@ -53,9 +81,11 @@ export default function App() {
   const [trialsLoading, setTrialsLoading] = useState(true);
 
   // ── Admin ────────────────────────────────────────────────────
-  const [showAdmin, setShowAdmin]         = useState(false);
-  const [adminPin, setAdminPin]           = useState("");
+  const [showAdmin, setShowAdmin]         = useState(false);  const [adminPin, setAdminPin]           = useState("");
   const [adminUnlocked, setAdminUnlocked] = useState(false);
+  // ── What's New ───────────────────────────────────────────────
+  const [showWhatsNew, setShowWhatsNew]   = useState(false);
+  const [whatsNewSeen, setWhatsNewSeen]   = useState(() => localStorage.getItem("nwn_seen_version") || "");
   const [adminTab, setAdminTab]           = useState("list");
   const [trialForm, setTrialForm]         = useState({ org:"NACSW", name:"", date:"", location:"", level:"", entryOpens:"", entryDeadline:"", entryLink:"", notes:"", adminNotes:"", needsInfo:false });
   const [adminFilter, setAdminFilter]     = useState("all"); // all | needsinfo
@@ -111,6 +141,11 @@ export default function App() {
       if (!u) setDataLoaded(false);
     });
     return () => unsub();
+  }, []);
+
+  // ── What's New — auto-show on new version ────────────────────
+  useEffect(() => {
+    if (whatsNewSeen !== APP_VERSION) setShowWhatsNew(true);
   }, []);
 
   // ── Firebase trial calendar ──────────────────────────────────
@@ -208,6 +243,12 @@ export default function App() {
     await signOut(auth);
     setDogs([]); setActiveDogId(null); setRegistrations({});
     setAllResults({}); setPhotos({}); setAllTraining({}); setDataLoaded(false); setUser(null);
+  }
+
+  function dismissWhatsNew() {
+    localStorage.setItem("nwn_seen_version", APP_VERSION);
+    setWhatsNewSeen(APP_VERSION);
+    setShowWhatsNew(false);
   }
 
   // ── Account management ───────────────────────────────────────
@@ -835,6 +876,10 @@ export default function App() {
             </div>
           </div>
           <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+            <button onClick={()=>setShowWhatsNew(true)} style={{ background:"transparent", border:"none", color:"rgba(255,255,255,0.75)", fontSize:20, cursor:"pointer", padding:4, position:"relative" }}>
+              🆕
+              {whatsNewSeen !== APP_VERSION && <span style={{ position:"absolute", top:2, right:2, width:8, height:8, background:"#f59e0b", borderRadius:"50%", border:"1px solid rgba(255,255,255,0.8)" }}/>}
+            </button>
             <button onClick={()=>setShowAdmin(true)} style={{ background:"transparent", border:"none", color:"rgba(255,255,255,0.75)", fontSize:20, cursor:"pointer", padding:4 }}>⚙️</button>
             <button onClick={handleLogout} style={{ background:"rgba(255,255,255,0.15)", border:"none", color:"#fff", borderRadius:8, padding:"4px 10px", fontSize:11, cursor:"pointer" }}>Sign out</button>
           </div>
@@ -1671,6 +1716,46 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {/* ── What's New Modal ─────────────────────────────────── */}
+      {showWhatsNew && (
+        <div onClick={dismissWhatsNew} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1000, display:"flex", alignItems:"flex-end", justifyContent:"center", padding:"0 0 0 0" }}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:"#fff", borderRadius:"20px 20px 0 0", padding:"24px 20px 32px", width:"100%", maxWidth:500, maxHeight:"80vh", overflowY:"auto", boxShadow:"0 -8px 32px rgba(0,0,0,0.2)" }}>
+            {/* Handle bar */}
+            <div style={{ width:40, height:4, background:"#e9d5ff", borderRadius:2, margin:"0 auto 18px" }}/>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+              <div>
+                <div style={{ fontSize:18, fontWeight:"bold", color:"#5b21b6" }}>✨ What's New</div>
+                <div style={{ fontSize:12, color:"#aaa", marginTop:2 }}>NoseWork Notebook</div>
+              </div>
+              <button onClick={dismissWhatsNew} style={{ background:"#f5f3ff", border:"none", color:"#7c3aed", borderRadius:20, padding:"6px 14px", fontSize:12, fontWeight:"bold", cursor:"pointer" }}>Got it ✓</button>
+            </div>
+            {WHATS_NEW.map((release, ri) => (
+              <div key={release.version} style={{ marginBottom: ri < WHATS_NEW.length - 1 ? 20 : 0 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+                  <span style={{ background: ri===0 ? "linear-gradient(135deg,#7c3aed,#06b6d4)" : "#f5f3ff", color: ri===0 ? "#fff" : "#7c3aed", borderRadius:20, padding:"3px 12px", fontSize:11, fontWeight:"bold" }}>
+                    v{release.version}
+                  </span>
+                  <span style={{ fontSize:12, color:"#888" }}>{release.date}</span>
+                  {ri===0 && <span style={{ background:"#fef3c7", color:"#b45309", borderRadius:20, padding:"2px 8px", fontSize:10, fontWeight:"bold" }}>NEW</span>}
+                </div>
+                <div style={{ fontWeight:"bold", fontSize:14, color:"#1e1b4b", marginBottom:8 }}>{release.title}</div>
+                <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
+                  {release.items.map((item, ii) => (
+                    <div key={ii} style={{ fontSize:13, color:"#444", background: ri===0 ? "#faf5ff" : "#f9fafb", borderRadius:8, padding:"8px 12px", borderLeft: ri===0 ? "3px solid #7c3aed" : "3px solid #e5e7eb" }}>
+                      {item}
+                    </div>
+                  ))}
+                </div>
+                {ri < WHATS_NEW.length - 1 && <div style={{ height:1, background:"#e9d5ff", margin:"18px 0 0" }}/>}
+              </div>
+            ))}
+            <button onClick={dismissWhatsNew} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", width:"100%", marginTop:22, padding:12 }}>
+              Got it — thanks! 🐾
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
