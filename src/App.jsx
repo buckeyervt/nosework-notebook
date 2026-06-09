@@ -533,6 +533,7 @@ export default function App() {
   }
 
   const myResults = activeDog ? (allResults[activeDog.id] || []) : [];
+  const myEventResults = myResults.filter(r => !r.isTitleOnly && r.notes !== "Title entered manually");
 
   // ── Manual title entry ───────────────────────────────────────
   async function addManualTitle(e) {
@@ -548,7 +549,10 @@ export default function App() {
         const storageRef = ref(storage, `certificates/${user.uid}/${Date.now()}`);
         await uploadBytes(storageRef, titleCertFile);
         certificateUrl = await getDownloadURL(storageRef);
-      } catch (err) { console.error("Certificate upload error:", err); }
+      } catch (err) {
+        console.error("Certificate upload error:", err);
+        alert("Certificate photo upload failed — title info will still be saved without the image. Try re-editing to upload the photo again.");
+      }
     }
     if (editingTitleId) {
       // Update existing result record
@@ -561,7 +565,7 @@ export default function App() {
       await saveUserData({ results: newResults });
       setEditingTitleId(null);
     } else {
-      // New manual title
+      // New manual title — marked isTitleOnly so it stays off the Results tab
       const newResult = {
         id: Date.now().toString(),
         org: titleForm.org,
@@ -574,6 +578,7 @@ export default function App() {
         photoUrl: "",
         videoLink: "",
         certificateUrl,
+        isTitleOnly: true,
       };
       const newResults = { ...allResults, [activeDog.id]: [...(allResults[activeDog.id]||[]), newResult] };
       setAllResults(newResults);
@@ -1114,9 +1119,9 @@ export default function App() {
             )}
             {trialsLoading&&<div style={{ textAlign:"center", color:"#bbb", fontSize:13, padding:16 }}>Syncing calendar…</div>}
             <div style={{ fontWeight:"bold", fontSize:14, marginBottom:10, color:"#5b21b6" }}>Recent Results — {activeDog?.callName}</div>
-            {myResults.length===0
+            {myEventResults.length===0
               ? <div style={{ color:"#bbb", fontSize:13 }}>No results yet — go sniff some stuff! 🐾</div>
-              : myResults.slice(-3).reverse().map(r=><ResultRow key={r.id} r={r}/>)
+              : myEventResults.slice(-3).reverse().map(r=><ResultRow key={r.id} r={r}/>)
             }
           </div>
         )}
@@ -1419,7 +1424,7 @@ export default function App() {
             )}
 
             {/* Results list */}
-            {(filterOrg==="All"?myResults:myResults.filter(r=>r.org===filterOrg)).slice().reverse().map(r=>(
+            {(filterOrg==="All"?myEventResults:myEventResults.filter(r=>r.org===filterOrg)).slice().reverse().map(r=>(
               <div key={r.id} style={{ background:ORG_BG[r.org]||"#fff", borderRadius:12, padding:14, marginBottom:10, borderLeft:`5px solid ${ORG_COLORS[r.org]}` }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
                   <div style={{ flex:1, marginRight:8 }}>
@@ -1457,7 +1462,7 @@ export default function App() {
                     {r.certificateUrl&&(
                       <div style={{ marginTop:8 }}>
                         <div style={{ fontSize:11, color:"#b45309", fontWeight:"bold", marginBottom:4 }}>🏅 Title Certificate</div>
-                        <img src={r.certificateUrl} alt="certificate" style={{ width:"100%", maxHeight:220, objectFit:"cover", borderRadius:8, border:"2px solid #fcd34d" }}/>
+                        <img src={r.certificateUrl} alt="certificate" style={{ width:"100%", maxHeight:400, objectFit:"contain", borderRadius:8, border:"2px solid #fcd34d", background:"#fffbeb" }}/>
                       </div>
                     )}
                     {/* Legacy: competition-level videoLink on old records with no runs — show as fallback */}
@@ -1474,7 +1479,7 @@ export default function App() {
                 </div>
               </div>
             ))}
-            {myResults.length===0&&<div style={{ color:"#bbb", fontSize:13, textAlign:"center", marginTop:30 }}>No results logged yet!</div>}
+            {myEventResults.length===0&&<div style={{ color:"#bbb", fontSize:13, textAlign:"center", marginTop:30 }}>No results logged yet!</div>}
           </div>
         )}
 
@@ -1569,7 +1574,7 @@ export default function App() {
                             </div>
                           </div>
                           {t.certificateUrl && (
-                            <img src={t.certificateUrl} alt="certificate" style={{ width:"100%", maxHeight:200, objectFit:"cover", borderRadius:8, marginTop:8, border:"2px solid #fcd34d" }}/>
+                            <img src={t.certificateUrl} alt="certificate" style={{ width:"100%", maxHeight:400, objectFit:"contain", borderRadius:8, marginTop:8, border:"2px solid #fcd34d", background:"#fffbeb" }}/>
                           )}
                         </div>
                       ))
@@ -1651,7 +1656,7 @@ export default function App() {
                 </div>
                 <div style={{ marginTop:16, display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
                   <StatCard label="Entered" value={Object.values(dogRegs).filter(v=>v?.status==="entered").length} icon="📋" small/>
-                  <StatCard label="Results" value={myResults.length} icon="✅" small/>
+                  <StatCard label="Results" value={myEventResults.length} icon="✅" small/>
                   <StatCard label="Titles" value={titlesEarned.length} icon="🏆" small/>
                 </div>
                 {dogs.length>1&&(
