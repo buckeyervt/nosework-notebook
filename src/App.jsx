@@ -132,6 +132,8 @@ export default function App() {
   const [editingRunResultIdx, setEditingRunResultIdx] = useState(null);
   const [showTitleForm, setShowTitleForm]   = useState(false);
   const [titleForm, setTitleForm]           = useState({ org:"NACSW", title:"", trial:"", date:"" });
+  const [editingTitleId, setEditingTitleId] = useState(null);
+  const [titleCertFile, setTitleCertFile]   = useState(null);
   const [trialView, setTrialView]           = useState("upcoming"); // "upcoming" | "past"
 
   // ── Training state ───────────────────────────────────────────
@@ -536,23 +538,50 @@ export default function App() {
   async function addManualTitle(e) {
     e.preventDefault();
     if (!activeDog) return;
-    const newResult = {
-      id: Date.now().toString(),
-      org: titleForm.org,
-      trial: titleForm.trial || "Pre-app title",
-      date: titleForm.date || "",
-      level: "",
-      result: "Pass",
-      title: titleForm.title,
-      notes: "Title entered manually",
-      photoUrl: "",
-      videoLink: "",
-    };
-    const newResults = { ...allResults, [activeDog.id]: [...(allResults[activeDog.id]||[]), newResult] };
-    setAllResults(newResults);
+    // Upload certificate if provided
+    let certificateUrl = "";
+    if (editingTitleId) {
+      certificateUrl = allResults[activeDog.id]?.find(r=>r.id===editingTitleId)?.certificateUrl || "";
+    }
+    if (titleCertFile) {
+      try {
+        const storageRef = ref(storage, `certificates/${user.uid}/${Date.now()}`);
+        await uploadBytes(storageRef, titleCertFile);
+        certificateUrl = await getDownloadURL(storageRef);
+      } catch (err) { console.error("Certificate upload error:", err); }
+    }
+    if (editingTitleId) {
+      // Update existing result record
+      const newResults = { ...allResults, [activeDog.id]: (allResults[activeDog.id]||[]).map(r =>
+        r.id === editingTitleId
+          ? { ...r, org:titleForm.org, title:titleForm.title, trial:titleForm.trial||r.trial, date:titleForm.date||r.date, certificateUrl }
+          : r
+      )};
+      setAllResults(newResults);
+      await saveUserData({ results: newResults });
+      setEditingTitleId(null);
+    } else {
+      // New manual title
+      const newResult = {
+        id: Date.now().toString(),
+        org: titleForm.org,
+        trial: titleForm.trial || "Pre-app title",
+        date: titleForm.date || "",
+        level: "",
+        result: "Pass",
+        title: titleForm.title,
+        notes: "Title entered manually",
+        photoUrl: "",
+        videoLink: "",
+        certificateUrl,
+      };
+      const newResults = { ...allResults, [activeDog.id]: [...(allResults[activeDog.id]||[]), newResult] };
+      setAllResults(newResults);
+      await saveUserData({ results: newResults });
+    }
     setShowTitleForm(false);
     setTitleForm({ org:"NACSW", title:"", trial:"", date:"" });
-    await saveUserData({ results: newResults });
+    setTitleCertFile(null);
   }
 
   // ── Training ─────────────────────────────────────────────────
@@ -1454,13 +1483,15 @@ export default function App() {
           <div>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
               <div style={{ fontWeight:"bold", fontSize:16, color:"#5b21b6" }}>🏆 {activeDog?.callName}'s Titles</div>
-              <button onClick={()=>setShowTitleForm(!showTitleForm)} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", fontSize:12, padding:"6px 14px" }}>+ Add Existing Title</button>
+              <button onClick={()=>{ setShowTitleForm(!showTitleForm); setEditingTitleId(null); setTitleForm({org:"NACSW",title:"",trial:"",date:""}); setTitleCertFile(null); }} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", fontSize:12, padding:"6px 14px" }}>
+                {showTitleForm && !editingTitleId ? "Cancel" : "+ Add Existing Title"}
+              </button>
             </div>
 
             {showTitleForm && (
               <form onSubmit={addManualTitle} style={formStyle}>
-                <div style={formTitle}>Add an Existing Title</div>
-                <div style={{ fontSize:12, color:"#888", marginBottom:12 }}>Use this to enter titles your dog already earned before using this app.</div>
+                <div style={formTitle}>{editingTitleId ? "✏️ Edit Title" : "Add an Existing Title"}</div>
+                {!editingTitleId && <div style={{ fontSize:12, color:"#888", marginBottom:12 }}>Use this to enter titles your dog already earned before using this app.</div>}
                 <label style={labelStyle}>Organization</label>
                 <select style={inputStyle} value={titleForm.org} onChange={e=>setTitleForm({...titleForm,org:e.target.value})}>
                   {ORGS.map(o=><option key={o}>{o}</option>)}
@@ -1471,9 +1502,38 @@ export default function App() {
                 <input style={inputStyle} value={titleForm.trial} onChange={e=>setTitleForm({...titleForm,trial:e.target.value})} placeholder="e.g. Spring NW1 Trial (optional)" />
                 <label style={labelStyle}>Date Earned</label>
                 <input type="date" style={inputStyle} value={titleForm.date} onChange={e=>setTitleForm({...titleForm,date:e.target.value})} />
+                {/* Certificate upload */}
+                <label style={labelStyle}>🏅 Title Certificate (optional)</label>
+                <div style={{ border:"1px dashed #fcd34d", borderRadius:8, padding:10, background:"#fffbeb", marginBottom:4 }}>
+                  {titleCertFile ? (
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      <img src={URL.createObjectURL(titleCertFile)} alt="preview" style={{ width:60, height:60, objectFit:"cover", borderRadius:8 }}/>
+                      <div>
+                        <div style={{ fontSize:12, color:"#b45309", fontWeight:"bold" }}>{titleCertFile.name}</div>
+                        <button type="button" onClick={()=>setTitleCertFile(null)} style={{ fontSize:11, color:"#c0392b", background:"none", border:"none", cursor:"pointer", padding:0 }}>Remove</button>
+                      </div>
+                    </div>
+                  ) : (editingTitleId && allResults[activeDog?.id]?.find(r=>r.id===editingTitleId)?.certificateUrl) ? (
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      <img src={allResults[activeDog.id].find(r=>r.id===editingTitleId).certificateUrl} alt="certificate" style={{ width:60, height:60, objectFit:"cover", borderRadius:8 }}/>
+                      <div>
+                        <div style={{ fontSize:12, color:"#b45309" }}>Certificate uploaded ✓</div>
+                        <label style={{ fontSize:11, color:"#7c3aed", cursor:"pointer", textDecoration:"underline" }}>
+                          Replace
+                          <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>setTitleCertFile(e.target.files[0]||null)}/>
+                        </label>
+                      </div>
+                    </div>
+                  ) : (
+                    <label style={{ cursor:"pointer", display:"flex", alignItems:"center", gap:8, fontSize:13, color:"#b45309" }}>
+                      <span style={{ fontSize:20 }}>🏅</span> Tap to add certificate photo
+                      <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>setTitleCertFile(e.target.files[0]||null)}/>
+                    </label>
+                  )}
+                </div>
                 <div style={{ display:"flex", gap:8, marginTop:12 }}>
-                  <button type="submit" style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)" }}>Save Title</button>
-                  <button type="button" onClick={()=>setShowTitleForm(false)} style={btnStyle("#aaa")}>Cancel</button>
+                  <button type="submit" style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)" }}>{editingTitleId ? "Save Changes" : "Save Title"}</button>
+                  <button type="button" onClick={()=>{ setShowTitleForm(false); setEditingTitleId(null); setTitleForm({org:"NACSW",title:"",trial:"",date:""}); setTitleCertFile(null); }} style={btnStyle("#aaa")}>Cancel</button>
                 </div>
               </form>
             )}
@@ -1497,7 +1557,14 @@ export default function App() {
                               </div>
                             </div>
                             <div style={{ display:"flex", gap:6, flexShrink:0 }}>
-                              <button onClick={()=>{ const full = myResults.find(r=>r.id===t.id); if(full) startEditResult(full); setTab("Results"); }} style={{ ...btnStyle("#7c3aed",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
+                              <button onClick={()=>{
+                                const full = myResults.find(r=>r.id===t.id);
+                                setTitleForm({ org:t.org, title:t.title, trial:t.trial||"", date:t.date||"" });
+                                setEditingTitleId(t.id);
+                                setTitleCertFile(null);
+                                setShowTitleForm(true);
+                                window.scrollTo(0,0);
+                              }} style={{ ...btnStyle("#7c3aed",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
                               <button onClick={()=>deleteResult(t.id)} style={{ ...btnStyle("#c0392b",true), padding:"3px 10px", fontSize:11 }}>Del</button>
                             </div>
                           </div>
