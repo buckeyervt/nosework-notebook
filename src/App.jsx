@@ -39,7 +39,7 @@ const WHATS_NEW = [
     date: "June 2026",
     title: "Title Certificates & Titles Page Editing",
     items: [
-      "🏅 Upload your title certificate photo when logging a result — appears in both the Results and Titles tabs.",
+      "🏅 Upload your title certificate photo from the Titles page — visible right on the Titles tab next to each earned title.",
       "✏️ Titles page now has Edit and Delete buttons on each title so you can update info or add a certificate to an existing title.",
     ],
   },
