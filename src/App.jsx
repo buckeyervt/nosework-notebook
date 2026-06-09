@@ -17,7 +17,7 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 const ORGS = ["NACSW", "UKC", "AKC", "USCSS/Other"];
 const ORG_COLORS = { NACSW: "#e07b39", UKC: "#3a7bd5", AKC: "#c0392b", "USCSS/Other": "#27ae60" };
 const ORG_BG     = { NACSW: "#fff5ee", UKC: "#eef4ff", AKC: "#fff0f0", "USCSS/Other": "#f0fff5" };
-const ADMIN_PIN  = "1234"; // ← Change this before sharing!
+const ADMIN_PIN  = "100476"; // ← Change this before sharing!
 
 const ORG_IDS = [
   { org: "NACSW",        key: "nacsw",  label: "NACSW #",                  placeholder: "e.g. K040827"       },
