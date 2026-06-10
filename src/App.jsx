@@ -17,7 +17,7 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 const ORGS = ["NACSW", "UKC", "AKC", "USCSS/Other"];
 const ORG_COLORS = { NACSW: "#e07b39", UKC: "#3a7bd5", AKC: "#c0392b", "USCSS/Other": "#27ae60" };
 const ORG_BG     = { NACSW: "#fff5ee", UKC: "#eef4ff", AKC: "#fff0f0", "USCSS/Other": "#f0fff5" };
-const ADMIN_PIN  = "100476"; // ← Change this before sharing!
+const ADMIN_PIN  = "1234"; // ← Change this before sharing!
 
 const ORG_IDS = [
   { org: "NACSW",        key: "nacsw",  label: "NACSW #",                  placeholder: "e.g. K040827"       },
@@ -32,8 +32,18 @@ const TABS = ["Dashboard", "Trials", "Results", "Titles", "Training", "My Dogs",
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.5";
+const APP_VERSION = "1.6";
 const WHATS_NEW = [
+  {
+    version: "1.6",
+    date: "June 2026",
+    title: "Collapsible Titles & Training Log",
+    items: [
+      "🏅 Titles page — each title card now collapses and expands. Certificate photos are hidden until you tap to expand, keeping the page clean as your title collection grows.",
+      "🎯 Training log — each session collapses to show date, type, feel rating, location, and run count. Tap ▼ to see full run detail, notes, and videos.",
+      "⊕ Expand All / ⊖ Collapse All button at the top of the Training log to manage the whole list at once.",
+    ],
+  },
   {
     version: "1.5",
     date: "June 2026",
@@ -134,6 +144,8 @@ export default function App() {
   // ── UI ───────────────────────────────────────────────────────
   const [filterOrg, setFilterOrg]           = useState("All");
   const [expandedResults, setExpandedResults] = useState(new Set());
+  const [expandedTitles, setExpandedTitles]   = useState(new Set());
+  const [expandedTraining, setExpandedTraining] = useState(new Set());
   const [showResultForm, setShowResultForm] = useState(false);
   const [resultForm, setResultForm]         = useState({ org:"NACSW", trial:"", date:"", title:"", notes:"", videoLink:"", runs:[] });
   const [resultPhotoFile, setResultPhotoFile] = useState(null);
@@ -1618,34 +1630,36 @@ export default function App() {
                   <div style={{ fontWeight:"bold", fontSize:14, marginBottom:8 }}><OrgBadge org={org} size={13}/> {org}</div>
                   {orgTitles.length===0
                     ? <div style={{ color:"#ccc", fontSize:13 }}>No titles yet — you've got this! 🐕</div>
-                    : orgTitles.map((t,i)=>(
-                        <div key={i} style={{ marginBottom:6, background:"rgba(255,255,255,0.6)", borderRadius:8, padding:"8px 12px" }}>
-                          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                            <span style={{ fontSize:20 }}>🏅</span>
-                            <div style={{ flex:1 }}>
-                              <div style={{ fontWeight:"bold" }}>{t.title}</div>
-                              <div style={{ fontSize:11, color:"#888" }}>
-                                {t.trial}{t.trial && t.date ? " · " : ""}{t.date}
-                                {t.trial==="Pre-app title" && !t.date ? <span style={{ color:"#bbb" }}> · manually entered</span> : ""}
+                    : orgTitles.map((t,i)=>{
+                        const isExpanded = expandedTitles.has(t.id);
+                        const toggleExpand = () => setExpandedTitles(prev => { const n = new Set(prev); isExpanded ? n.delete(t.id) : n.add(t.id); return n; });
+                        return (
+                          <div key={i} style={{ marginBottom:6, background:"rgba(255,255,255,0.6)", borderRadius:8, overflow:"hidden" }}>
+                            {/* Always visible row */}
+                            <div onClick={toggleExpand} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", cursor:"pointer" }}>
+                              <span style={{ fontSize:20 }}>🏅</span>
+                              <div style={{ flex:1 }}>
+                                <div style={{ fontWeight:"bold" }}>{t.title}</div>
+                                <div style={{ fontSize:11, color:"#888" }}>
+                                  {t.trial}{t.trial && t.date ? " · " : ""}{t.date}
+                                  {t.trial==="Pre-app title" && !t.date ? <span style={{ color:"#bbb" }}> · manually entered</span> : ""}
+                                </div>
+                              </div>
+                              <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
+                                <button onClick={e=>{e.stopPropagation(); const full=myResults.find(r=>r.id===t.id); setTitleForm({org:t.org,title:t.title,trial:t.trial||"",date:t.date||""}); setEditingTitleId(t.id); setTitleCertFile(null); setShowTitleForm(true); window.scrollTo(0,0);}} style={{ ...btnStyle("#7c3aed",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
+                                <button onClick={e=>{e.stopPropagation(); deleteResult(t.id);}} style={{ ...btnStyle("#c0392b",true), padding:"3px 10px", fontSize:11 }}>Del</button>
+                                {t.certificateUrl && <span style={{ fontSize:12, color:"#bbb" }}>{isExpanded ? "▲" : "▼"}</span>}
                               </div>
                             </div>
-                            <div style={{ display:"flex", gap:6, flexShrink:0 }}>
-                              <button onClick={()=>{
-                                const full = myResults.find(r=>r.id===t.id);
-                                setTitleForm({ org:t.org, title:t.title, trial:t.trial||"", date:t.date||"" });
-                                setEditingTitleId(t.id);
-                                setTitleCertFile(null);
-                                setShowTitleForm(true);
-                                window.scrollTo(0,0);
-                              }} style={{ ...btnStyle("#7c3aed",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
-                              <button onClick={()=>deleteResult(t.id)} style={{ ...btnStyle("#c0392b",true), padding:"3px 10px", fontSize:11 }}>Del</button>
-                            </div>
+                            {/* Certificate — only in expanded state */}
+                            {isExpanded && t.certificateUrl && (
+                              <div style={{ padding:"0 12px 12px" }}>
+                                <img src={t.certificateUrl} alt="certificate" style={{ width:"100%", maxHeight:400, objectFit:"contain", borderRadius:8, border:"2px solid #fcd34d", background:"#fffbeb" }}/>
+                              </div>
+                            )}
                           </div>
-                          {t.certificateUrl && (
-                            <img src={t.certificateUrl} alt="certificate" style={{ width:"100%", maxHeight:400, objectFit:"contain", borderRadius:8, marginTop:8, border:"2px solid #fcd34d", background:"#fffbeb" }}/>
-                          )}
-                        </div>
-                      ))
+                        );
+                      })
                   }
                 </div>
               );
@@ -1941,60 +1955,85 @@ export default function App() {
 
             {myTraining.length===0
               ? <div style={{ color:"#bbb", fontSize:13, textAlign:"center", marginTop:30 }}>No training logged yet — after each session jot a quick note here! 🐾</div>
-              : myTraining.map(entry=>(
-                <div key={entry.id} style={{ background:"#fff", borderRadius:12, padding:14, marginBottom:10, border:"1px solid #e9d5ff", boxShadow:"0 1px 6px rgba(0,0,0,0.05)" }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
-                    <div style={{ flex:1, marginRight:8 }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
-                        <div style={{ fontWeight:"bold", fontSize:14 }}>
-                          {entry.date}{entry.time&&<span style={{ color:"#888", fontWeight:"normal", fontSize:12 }}> · {entry.time}</span>}
-                        </div>
-                        <span style={{ background:"#ede9fe", color:"#7c3aed", borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:"bold" }}>{entry.type}</span>
-                        <span style={{ fontSize:15 }}>{entry.rating?.split(" ")[0]}</span>
-                      </div>
-                      {entry.location&&<div style={{ fontSize:12, color:"#666", marginTop:3 }}>📍 {entry.location}</div>}
-                      {entry.notes&&<div style={{ fontSize:12, color:"#555", marginTop:4, fontStyle:"italic" }}>{entry.notes}</div>}
-
-                      {/* Runs summary */}
-                      {(entry.runs?.length>0) ? (
-                        <div style={{ marginTop:8 }}>
-                          <div style={{ fontSize:11, color:"#5b21b6", fontWeight:"bold", marginBottom:4 }}>{entry.runs.length} Run{entry.runs.length>1?"s":""}</div>
-                          {entry.runs.map((run,i)=>(
-                            <div key={i} style={{ background:"#faf5ff", borderRadius:8, padding:"6px 10px", marginBottom:4, border:"1px solid #e9d5ff" }}>
-                              <div style={{ display:"flex", gap:4, flexWrap:"wrap", alignItems:"center" }}>
-                                <span style={{ fontSize:11, color:"#888", marginRight:2 }}>Run {i+1}:</span>
-                                {run.odors?.map(o=><span key={o} style={{ background:"#ede9fe", color:"#7c3aed", borderRadius:20, padding:"1px 7px", fontSize:10, fontWeight:"bold" }}>{o}</span>)}
-                                {run.converging&&<span style={{ background:"#fef3c7", color:"#b45309", borderRadius:20, padding:"1px 7px", fontSize:10, fontWeight:"bold" }}>🌀 Converging</span>}
-                                <span style={{ background:"#f0fdf4", color:"#166534", borderRadius:20, padding:"1px 7px", fontSize:10 }}>{run.hideCount||"Single"} · {run.hideType}</span>
-                                {run.elements?.map(el=><span key={el} style={{ background:"#f0f9ff", color:"#0369a1", borderRadius:20, padding:"1px 7px", fontSize:10 }}>{el}</span>)}
-                              </div>
-                              {run.blindOutcome&&<div style={{ fontSize:10, color:"#666", marginTop:2, fontStyle:"italic" }}>→ {run.blindOutcome}</div>}
-                              {run.notes&&<div style={{ fontSize:10, color:"#888", marginTop:1 }}>{run.notes}</div>}
-                              {run.videoUrl&&(
-                                <button onClick={()=>window.open(run.videoUrl,"_blank")} style={{ display:"flex", alignItems:"center", gap:5, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"3px 10px", fontSize:11, cursor:"pointer", marginTop:4, fontWeight:"bold" }}>
-                                  🎥 Watch Run {i+1} →
-                                </button>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div style={{ fontSize:11, color:"#f59e0b", marginTop:4 }}>📝 Tap Edit to add runs</div>
-                      )}
-
-                      {entry.videoLink&&(
-                        <button onClick={()=>window.open(entry.videoLink,"_blank")} style={{ display:"flex", alignItems:"center", gap:6, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"5px 10px", fontSize:11, cursor:"pointer", marginTop:6, fontWeight:"bold" }}>
-                          🎥 Watch Training Video →
-                        </button>
-                      )}
-                    </div>
-                    <div style={{ display:"flex", gap:6, flexShrink:0 }}>
-                      <button onClick={()=>startEditTraining(entry)} style={{ ...btnStyle("#7c3aed",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
-                      <button onClick={()=>deleteTrainingEntry(entry.id)} style={{ ...btnStyle("#c0392b",true), padding:"3px 10px", fontSize:11 }}>Delete</button>
-                    </div>
+              : <>
+                  <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:8 }}>
+                    <button onClick={()=>{
+                      const allExpanded = myTraining.every(e=>expandedTraining.has(e.id));
+                      if (allExpanded) {
+                        setExpandedTraining(new Set());
+                      } else {
+                        setExpandedTraining(new Set(myTraining.map(e=>e.id)));
+                      }
+                    }} style={{ fontSize:11, color:"#7c3aed", background:"#f5f3ff", border:"1px solid #e9d5ff", borderRadius:20, padding:"4px 12px", cursor:"pointer" }}>
+                      {myTraining.every(e=>expandedTraining.has(e.id)) ? "⊖ Collapse All" : "⊕ Expand All"}
+                    </button>
                   </div>
-                </div>
-              ))
+                  {myTraining.map(entry=>{
+                    const isExpanded = expandedTraining.has(entry.id);
+                    const toggleExpand = () => setExpandedTraining(prev => { const n = new Set(prev); isExpanded ? n.delete(entry.id) : n.add(entry.id); return n; });
+                    return (
+                      <div key={entry.id} style={{ background:"#fff", borderRadius:12, marginBottom:10, border:"1px solid #e9d5ff", boxShadow:"0 1px 6px rgba(0,0,0,0.05)", overflow:"hidden" }}>
+                        {/* ── Collapsed header — always visible ── */}
+                        <div onClick={toggleExpand} style={{ padding:"12px 14px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", marginBottom:2 }}>
+                              <span style={{ fontWeight:"bold", fontSize:14 }}>
+                                {entry.date}{entry.time&&<span style={{ color:"#888", fontWeight:"normal", fontSize:12 }}> · {entry.time}</span>}
+                              </span>
+                              <span style={{ background:"#ede9fe", color:"#7c3aed", borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:"bold" }}>{entry.type}</span>
+                              <span style={{ fontSize:15 }}>{entry.rating?.split(" ")[0]}</span>
+                              {entry.runs?.length>0 && <span style={{ background:"#f5f3ff", color:"#7c3aed", borderRadius:20, padding:"1px 8px", fontSize:10, fontWeight:"bold" }}>🏃 {entry.runs.length} run{entry.runs.length>1?"s":""}</span>}
+                            </div>
+                            {entry.location&&<div style={{ fontSize:12, color:"#666" }}>📍 {entry.location}</div>}
+                            {!isExpanded && entry.notes&&<div style={{ fontSize:11, color:"#777", fontStyle:"italic", marginTop:2 }}>{entry.notes}</div>}
+                          </div>
+                          <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
+                            <button onClick={e=>{e.stopPropagation();startEditTraining(entry);}} style={{ ...btnStyle("#7c3aed",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
+                            <button onClick={e=>{e.stopPropagation();deleteTrainingEntry(entry.id);}} style={{ ...btnStyle("#c0392b",true), padding:"3px 10px", fontSize:11 }}>Del</button>
+                            <span style={{ fontSize:14, color:"#bbb", marginLeft:2 }}>{isExpanded ? "▲" : "▼"}</span>
+                          </div>
+                        </div>
+
+                        {/* ── Expanded detail ── */}
+                        {isExpanded && (
+                          <div style={{ padding:"0 14px 14px" }}>
+                            {entry.notes&&<div style={{ fontSize:12, color:"#555", marginBottom:8, fontStyle:"italic" }}>{entry.notes}</div>}
+                            {(entry.runs?.length>0) ? (
+                              <div>
+                                <div style={{ fontSize:11, color:"#5b21b6", fontWeight:"bold", marginBottom:4 }}>{entry.runs.length} Run{entry.runs.length>1?"s":""}</div>
+                                {entry.runs.map((run,i)=>(
+                                  <div key={i} style={{ background:"#faf5ff", borderRadius:8, padding:"6px 10px", marginBottom:4, border:"1px solid #e9d5ff" }}>
+                                    <div style={{ display:"flex", gap:4, flexWrap:"wrap", alignItems:"center" }}>
+                                      <span style={{ fontSize:11, color:"#888", marginRight:2 }}>Run {i+1}:</span>
+                                      {run.odors?.map(o=><span key={o} style={{ background:"#ede9fe", color:"#7c3aed", borderRadius:20, padding:"1px 7px", fontSize:10, fontWeight:"bold" }}>{o}</span>)}
+                                      {run.converging&&<span style={{ background:"#fef3c7", color:"#b45309", borderRadius:20, padding:"1px 7px", fontSize:10, fontWeight:"bold" }}>🌀 Converging</span>}
+                                      <span style={{ background:"#f0fdf4", color:"#166534", borderRadius:20, padding:"1px 7px", fontSize:10 }}>{run.hideCount||"Single"} · {run.hideType}</span>
+                                      {run.elements?.map(el=><span key={el} style={{ background:"#f0f9ff", color:"#0369a1", borderRadius:20, padding:"1px 7px", fontSize:10 }}>{el}</span>)}
+                                    </div>
+                                    {run.blindOutcome&&<div style={{ fontSize:10, color:"#666", marginTop:2, fontStyle:"italic" }}>→ {run.blindOutcome}</div>}
+                                    {run.notes&&<div style={{ fontSize:10, color:"#888", marginTop:1 }}>{run.notes}</div>}
+                                    {run.videoUrl&&(
+                                      <button onClick={()=>window.open(run.videoUrl,"_blank")} style={{ display:"flex", alignItems:"center", gap:5, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"3px 10px", fontSize:11, cursor:"pointer", marginTop:4, fontWeight:"bold" }}>
+                                        🎥 Watch Run {i+1} →
+                                      </button>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div style={{ fontSize:11, color:"#f59e0b" }}>📝 Tap Edit to add runs</div>
+                            )}
+                            {entry.videoLink&&(
+                              <button onClick={()=>window.open(entry.videoLink,"_blank")} style={{ display:"flex", alignItems:"center", gap:6, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"5px 10px", fontSize:11, cursor:"pointer", marginTop:6, fontWeight:"bold" }}>
+                                🎥 Watch Training Video →
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </>
             }
           </div>
         )}
