@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import { MASTER_TRIALS } from "./trials";
+import { CHEAT_SHEETS } from "./rulesCheatSheets";
+import { detectEarnedTitles } from "./titleRules";
 import {
   collection, doc, setDoc, deleteDoc, onSnapshot,
   writeBatch, getDoc, getDocs, addDoc, arrayUnion, arrayRemove, serverTimestamp
@@ -12,28 +14,44 @@ import {
 } from "firebase/auth";
 import { storage } from "./firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-
 // ── Constants ────────────────────────────────────────────────
 const ORGS = ["NACSW", "UKC", "AKC", "USCSS/Other"];
 const ORG_COLORS = { NACSW: "#e07b39", UKC: "#3a7bd5", AKC: "#c0392b", "USCSS/Other": "#27ae60" };
 const ORG_BG     = { NACSW: "#fff5ee", UKC: "#eef4ff", AKC: "#fff0f0", "USCSS/Other": "#f0fff5" };
 const ADMIN_PIN  = "1234"; // ← Change this before sharing!
-
 const ORG_IDS = [
   { org: "NACSW",        key: "nacsw",  label: "NACSW #",                  placeholder: "e.g. K040827"       },
   { org: "AKC",          key: "akc",    label: "AKC # (Canine Partners)",   placeholder: "e.g. MB25813301"    },
   { org: "UKC",          key: "ukc",    label: "UKC Performance Listing #", placeholder: "e.g. PL025899"      },
   { org: "USCSS/Other",  key: "uscss",  label: "USCSS Member #",            placeholder: "e.g. your USCSS ID" },
 ];
-
 const auth = getAuth();
-const TABS = ["Dashboard", "Trials", "Results", "Titles", "Training", "My Dogs", "Account", "Ideas 💡"];
-
+const TABS = ["Dashboard", "Trials", "Results", "Titles", "Training", "My Dogs", "Rules & Regs", "Account", "Ideas 💡"];
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.6";
+const APP_VERSION = "1.8";
 const WHATS_NEW = [
+  {
+    version: "1.8",
+    date: "August 2026",
+    title: "Automatic Title Detection",
+    items: [
+      "🎉 The app now watches your logged Results and suggests titles for you — when your runs satisfy an org's requirements (right elements, right level, enough qualifying legs), a banner shows up on the Titles tab (and Dashboard) so you can confirm and add it with one tap.",
+      "🎯 Results runs now have optional Points and Faults fields — filling these in helps the app match each org's real qualifying thresholds more precisely.",
+      "🏷️ Auto-added titles are tagged \"✓ Auto-detected\" so you can tell them apart from titles you entered by hand.",
+      "✏️ Manual title entry is still there and unchanged — perfect for titles a club awards outside the official rulebook, or anything the auto-detection can't see (Elite/Summit/Champion tiers, Games, etc. still need to be added manually).",
+    ],
+  },
+  {
+    version: "1.7",
+    date: "August 2026",
+    title: "Rules & Regs Cheat Sheets",
+    items: [
+      "📖 New Rules & Regs tab — a fast-pass cheat sheet for each org (NACSW, AKC, UKC, USCSS) covering classes, what to expect in each search, how to move up, and common faults.",
+      "📄 Full official rulebook PDF linked at the bottom of each org's section, kept current by Tina.",
+    ],
+  },
   {
     version: "1.6",
     date: "June 2026",
@@ -97,7 +115,6 @@ const WHATS_NEW = [
   },
 ];
 const blankDog = () => ({ id: Date.now().toString(), callName:"", name:"", breed:"", dob:"", nacsw:"", akc:"", ukc:"", uscss:"" });
-
 export default function App() {
   // ── Auth state ───────────────────────────────────────────────
   const [user, setUser]               = useState(null);
@@ -106,7 +123,6 @@ export default function App() {
   const [authForm, setAuthForm]       = useState({ name:"", email:"", password:"" });
   const [authError, setAuthError]     = useState("");
   const [authLogging, setAuthLogging] = useState(false);
-
   // ── Core state ───────────────────────────────────────────────
   const [tab, setTab]                   = useState("Dashboard");
   const [dogs, setDogs]                 = useState([]);
@@ -115,11 +131,18 @@ export default function App() {
   const [registrations, setRegistrations] = useState({});
   const [allResults, setAllResults]     = useState({});
   const [dataLoaded, setDataLoaded]     = useState(false);
-
   // ── Firebase trial calendar ──────────────────────────────────
   const [trials, setTrials]             = useState([]);
   const [trialsLoading, setTrialsLoading] = useState(true);
-
+  // ── Rules & Regs (org rulebook links) ─────────────────────────
+  const [rulesDocs, setRulesDocs]         = useState({});
+  const [rulesDocsLoading, setRulesDocsLoading] = useState(true);
+  const [expandedRules, setExpandedRules] = useState(new Set());
+  const [rulesEditOrg, setRulesEditOrg]   = useState(null);
+  const [rulesEditLink, setRulesEditLink] = useState("");
+  const [rulesEditUpdated, setRulesEditUpdated] = useState("");
+  // ── Title auto-detection ──────────────────────────────────────
+  const [dismissedTitleSuggestions, setDismissedTitleSuggestions] = useState({}); // { [dogId]: [key,...] }
   // ── Admin ────────────────────────────────────────────────────
   const [showAdmin, setShowAdmin]         = useState(false);  const [adminPin, setAdminPin]           = useState("");
   const [adminUnlocked, setAdminUnlocked] = useState(false);
@@ -140,26 +163,24 @@ export default function App() {
   const [quickEditMode, setQuickEditMode] = useState("link"); // "link" | "location"
   const [quickEditLocation, setQuickEditLocation] = useState("");
   const [editingTrialId, setEditingTrialId] = useState(null);
-
   // ── UI ───────────────────────────────────────────────────────
   const [filterOrg, setFilterOrg]           = useState("All");
   const [expandedResults, setExpandedResults] = useState(new Set());
   const [expandedTitles, setExpandedTitles]   = useState(new Set());
   const [expandedTraining, setExpandedTraining] = useState(new Set());
   const [showResultForm, setShowResultForm] = useState(false);
-  const [resultForm, setResultForm]         = useState({ org:"NACSW", trial:"", date:"", title:"", notes:"", videoLink:"", runs:[] });
+  const [resultForm, setResultForm]         = useState({ org:"NACSW", trial:"", date:"", title:"", notes:"", videoLink:"", trialType:"", runs:[] });
   const [resultPhotoFile, setResultPhotoFile] = useState(null);
   const [certificatePhotoFile, setCertificatePhotoFile] = useState(null);
   const [editingResultId, setEditingResultId] = useState(null);
   const [showRunResultForm, setShowRunResultForm] = useState(false);
-  const [runResultForm, setRunResultForm]   = useState({ element:"Interior", level:"", result:"Pass", isGame:false, gameName:"", place:"", outOf:"", time:"", notes:"" });
+  const [runResultForm, setRunResultForm]   = useState({ element:"Interior", level:"", result:"Pass", isGame:false, gameName:"", place:"", outOf:"", time:"", notes:"", points:"", faults:"" });
   const [editingRunResultIdx, setEditingRunResultIdx] = useState(null);
   const [showTitleForm, setShowTitleForm]   = useState(false);
   const [titleForm, setTitleForm]           = useState({ org:"NACSW", title:"", trial:"", date:"" });
   const [editingTitleId, setEditingTitleId] = useState(null);
   const [titleCertFile, setTitleCertFile]   = useState(null);
   const [trialView, setTrialView]           = useState("upcoming"); // "upcoming" | "past"
-
   // ── Training state ───────────────────────────────────────────
   const [allTraining, setAllTraining]           = useState({});
   const [showTrainingForm, setShowTrainingForm] = useState(false);
@@ -173,18 +194,15 @@ export default function App() {
   const [deleteConfirm, setDeleteConfirm]   = useState(null);
   const [onboardStep, setOnboardStep]       = useState(0);
   const [onboardDog, setOnboardDog]         = useState(blankDog());
-
   // ── Account settings state ───────────────────────────────────
   const [accountForm, setAccountForm]       = useState({ name:"", email:"", newPassword:"", currentPassword:"" });
   const [accountMsg, setAccountMsg]         = useState("");
   const [accountError, setAccountError]     = useState("");
   const [showDeleteAccount, setShowDeleteAccount] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
-
   const activeDog = dogs.find(d => d.id === activeDogId) || dogs[0];
   const today = new Date();
   const todayStr = today.toLocaleDateString("en-CA"); // YYYY-MM-DD in local time
-
   // ── Auth listener ────────────────────────────────────────────
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async u => {
@@ -194,12 +212,10 @@ export default function App() {
     });
     return () => unsub();
   }, []);
-
   // ── What's New — auto-show on new version ────────────────────
   useEffect(() => {
     if (whatsNewSeen !== APP_VERSION) setShowWhatsNew(true);
   }, []);
-
   // ── Firebase trial calendar ──────────────────────────────────
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "trials"), snap => {
@@ -208,7 +224,15 @@ export default function App() {
     }, () => { setTrials(MASTER_TRIALS); setTrialsLoading(false); });
     return () => unsub();
   }, []);
-
+  // ── Rules & Regs — rulebook links (real-time) ─────────────────
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "rulesDocs"), snap => {
+      const data = {};
+      snap.docs.forEach(d => { data[d.id] = d.data(); });
+      setRulesDocs(data); setRulesDocsLoading(false);
+    }, () => { setRulesDocsLoading(false); });
+    return () => unsub();
+  }, []);
   // ── Feature requests (real-time) ─────────────────────────────
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "featureRequests"), snap => {
@@ -218,7 +242,6 @@ export default function App() {
     }, () => {});
     return () => unsub();
   }, []);
-
   // ── Load user data from Firebase (real-time) ─────────────────
   useEffect(() => {
     if (!user) return;
@@ -232,6 +255,7 @@ export default function App() {
         setAllResults(data.results || {});
         setPhotos(data.photos || {});
         setAllTraining(data.training || {});
+        setDismissedTitleSuggestions(data.dismissedTitles || {});
         setActiveDogId(current => {
           if (current && loadedDogs.find(d => d.id === current)) return current;
           if (data.activeDogId && loadedDogs.find(d => d.id === data.activeDogId)) return data.activeDogId;
@@ -242,7 +266,6 @@ export default function App() {
     }, (err) => { console.error("Snapshot error:", err); setDataLoaded(true); });
     return () => unsub();
   }, [user]);
-
   // ── Save user data to Firebase ───────────────────────────────
   async function saveUserData(updates) {
     if (!user) return;
@@ -250,7 +273,6 @@ export default function App() {
       await setDoc(doc(db, "users", user.uid), updates, { merge: true });
     } catch (e) { console.error("Save error:", e); }
   }
-
   // ── Auth functions ───────────────────────────────────────────
   async function handleSignup(e) {
     e.preventDefault();
@@ -264,7 +286,6 @@ export default function App() {
     }
     setAuthLogging(false);
   }
-
   async function handleLogin(e) {
     e.preventDefault();
     setAuthError(""); setAuthLogging(true);
@@ -275,7 +296,6 @@ export default function App() {
     }
     setAuthLogging(false);
   }
-
   async function handleReset(e) {
     e.preventDefault();
     setAuthError(""); setAuthLogging(true);
@@ -287,7 +307,6 @@ export default function App() {
     }
     setAuthLogging(false);
   }
-
   function friendlyError(code) {
     const map = {
       "auth/email-already-in-use": "That email is already registered. Try logging in!",
@@ -300,19 +319,16 @@ export default function App() {
     };
     return map[code] || "Something went wrong. Please try again.";
   }
-
   async function handleLogout() {
     await signOut(auth);
     setDogs([]); setActiveDogId(null); setRegistrations({});
     setAllResults({}); setPhotos({}); setAllTraining({}); setDataLoaded(false); setUser(null);
   }
-
   function dismissWhatsNew() {
     localStorage.setItem("nwn_seen_version", APP_VERSION);
     setWhatsNewSeen(APP_VERSION);
     setShowWhatsNew(false);
   }
-
   // ── Feature requests ─────────────────────────────────────────
   const myOpenIdeas = featureRequests.filter(r => r.submittedByUid === user?.uid && r.status === "open");
   async function submitIdea(e) {
@@ -351,7 +367,17 @@ export default function App() {
     const comment = adminIdeaComment[idea.id] ?? idea.adminComment ?? "";
     await setDoc(doc(db, "featureRequests", idea.id), { status, adminComment: comment }, { merge: true });
   }
-
+  // ── Rules & Regs — admin save ──────────────────────────────────
+  async function saveRulesDoc(org) {
+    await setDoc(doc(db, "rulesDocs", org), {
+      org,
+      pdfUrl: rulesEditLink.trim(),
+      lastUpdated: rulesEditUpdated.trim(),
+    }, { merge: true });
+    setRulesEditOrg(null);
+    setRulesEditLink("");
+    setRulesEditUpdated("");
+  }
   // ── Account management ───────────────────────────────────────
   async function updateAccountName(e) {
     e.preventDefault();
@@ -362,7 +388,6 @@ export default function App() {
       setAccountForm(f => ({...f, name:""}));
     } catch (err) { setAccountError("Could not update name. Please try again."); }
   }
-
   async function updateAccountEmail(e) {
     e.preventDefault();
     setAccountMsg(""); setAccountError("");
@@ -391,7 +416,6 @@ export default function App() {
       else setAccountError("Could not update email. Please try again.");
     }
   }
-
   async function updateAccountPassword(e) {
     e.preventDefault();
     setAccountMsg(""); setAccountError("");
@@ -406,7 +430,6 @@ export default function App() {
       else setAccountError("Could not update password. Please try again.");
     }
   }
-
   async function handleDeleteAccount(e) {
     e.preventDefault();
     setAccountError("");
@@ -424,7 +447,6 @@ export default function App() {
       else setAccountError("Could not delete account. Please try again.");
     }
   }
-
   // ── Onboarding (first dog setup) ─────────────────────────────
   async function finishOnboarding() {
     const dog = { ...onboardDog, id: Date.now().toString() };
@@ -432,7 +454,6 @@ export default function App() {
     setDogs(newDogs); setActiveDogId(dog.id);
     await saveUserData({ dogs: newDogs, activeDogId: dog.id, registrations:{}, results:{}, photos:{} });
   }
-
   // ── Dog management ───────────────────────────────────────────
   async function saveDog(e) {
     e.preventDefault();
@@ -455,7 +476,6 @@ export default function App() {
     setDeleteConfirm(null);
     await saveUserData({ dogs: rem, activeDogId: newActiveId });
   }
-
   // ── Registrations — status + paid ────────────────────────────
   // dogRegs[dogId][trialId] = { status: "none"|"waitlist"|"entered", paid: bool }
   async function setTrialStatus(trialId, status) {
@@ -477,11 +497,9 @@ export default function App() {
   const dogRegs = activeDog ? (registrations[activeDog.id] || {}) : {};
   const getStatus = (trialId) => dogRegs[trialId]?.status || "none";
   const getPaid   = (trialId) => dogRegs[trialId]?.paid || false;
-
   // ── Results ──────────────────────────────────────────────────
-  const blankResultForm = () => ({ org:"NACSW", trial:"", date:"", title:"", notes:"", videoLink:"", runs:[] });
-  const blankRunResultForm = () => ({ element:"Interior", level:"", result:"Pass", isGame:false, gameName:"", place:"", outOf:"", time:"", notes:"", videoUrl:"" });
-
+  const blankResultForm = () => ({ org:"NACSW", trial:"", date:"", title:"", notes:"", videoLink:"", trialType:"", runs:[] });
+  const blankRunResultForm = () => ({ element:"Interior", level:"", result:"Pass", isGame:false, gameName:"", place:"", outOf:"", time:"", notes:"", videoUrl:"", points:"", faults:"" });
   function saveRunResult() {
     if (!runResultForm.element) { alert("Please select a search element."); return; }
     if (editingRunResultIdx !== null) {
@@ -494,11 +512,9 @@ export default function App() {
     setRunResultForm(blankRunResultForm());
     setShowRunResultForm(false);
   }
-
   function deleteRunResult(idx) {
     setResultForm(prev => ({...prev, runs: prev.runs.filter((_,i)=>i!==idx)}));
   }
-
   async function addResult(e) {
     e.preventDefault();
     if (!activeDog) return;
@@ -537,7 +553,6 @@ export default function App() {
     setShowRunResultForm(false);
     setEditingRunResultIdx(null);
   }
-
   function startEditResult(r) {
     setResultForm({...r, runs: r.runs||[]});
     setEditingResultId(r.id);
@@ -548,17 +563,14 @@ export default function App() {
     setCertificatePhotoFile(null);
     window.scrollTo(0,0);
   }
-
   async function deleteResult(id) {
     if (!activeDog) return;
     const newResults = { ...allResults, [activeDog.id]: (allResults[activeDog.id]||[]).filter(r=>r.id!==id) };
     setAllResults(newResults);
     await saveUserData({ results: newResults });
   }
-
   const myResults = activeDog ? (allResults[activeDog.id] || []) : [];
   const myEventResults = myResults.filter(r => !r.isTitleOnly && r.notes !== "Title entered manually");
-
   // ── Manual title entry ───────────────────────────────────────
   async function addManualTitle(e) {
     e.preventDefault();
@@ -612,14 +624,11 @@ export default function App() {
     setTitleForm({ org:"NACSW", title:"", trial:"", date:"" });
     setTitleCertFile(null);
   }
-
   // ── Training ─────────────────────────────────────────────────
   const myTraining = activeDog ? (allTraining[activeDog.id] || []) : [];
   const blankTrainingForm = () => ({ date: new Date().toISOString().slice(0,10), time:"", type:"Class", location:"", notes:"", rating:"👍 Great", videoLink:"", runs:[] });
   const blankRunForm = () => ({ odors:[], hideCount:"Single", hideType:"Blind", elements:[], blindOutcome:"", converging:false, notes:"", videoUrl:"" });
-
   function toggleMulti(arr, val) { return arr.includes(val) ? arr.filter(x=>x!==val) : [...arr, val]; }
-
   function saveRun() {
     if (!runForm.odors.length) { alert("Please select at least one odor, or tap Unknown if you're not sure yet."); return; }
     if (!runForm.elements.length) { alert("Please select at least one search element."); return; }
@@ -633,11 +642,9 @@ export default function App() {
     setRunForm(blankRunForm());
     setShowRunForm(false);
   }
-
   function deleteRun(idx) {
     setTrainingForm({...trainingForm, runs: trainingForm.runs.filter((_,i)=>i!==idx)});
   }
-
   async function addTrainingEntry(e) {
     e.preventDefault();
     if (!activeDog) return;
@@ -658,14 +665,12 @@ export default function App() {
     setShowRunForm(false);
     setEditingRunIdx(null);
   }
-
   async function deleteTrainingEntry(entryId) {
     if (!activeDog) return;
     const newTraining = { ...allTraining, [activeDog.id]: (allTraining[activeDog.id]||[]).filter(e=>e.id!==entryId) };
     setAllTraining(newTraining);
     await saveUserData({ training: newTraining });
   }
-
   function startEditTraining(entry) {
     setTrainingForm({ ...entry, runs: entry.runs||[] });
     setEditingTrainingId(entry.id);
@@ -688,7 +693,6 @@ export default function App() {
       alert("Photo upload failed. Please try again.");
     }
   }
-
   // ── Admin ────────────────────────────────────────────────────
   async function seedTrials() {
     const batch = writeBatch(db);
@@ -707,12 +711,44 @@ export default function App() {
   async function deleteTrial(id) {
     if (window.confirm("Delete this trial for everyone?")) await deleteDoc(doc(db, "trials", id));
   }
-
   // ── Derived ──────────────────────────────────────────────────
   const upcoming     = trials.filter(t => t.date >= todayStr);
   const deadlineSoon = trials.filter(t => { if (!t.entryDeadline) return false; const d = Math.ceil((new Date(t.entryDeadline+"T12:00:00") - today)/86400000); return d>=0&&d<=14&&getStatus(t.id)==="none"; });
   const opensSoon    = trials.filter(t => { if (!t.entryOpens) return false; const d = Math.ceil((new Date(t.entryOpens+"T12:00:00") - today)/86400000); return d>=0&&d<=7&&getStatus(t.id)==="none"; });
-  const titlesEarned = myResults.filter(r=>r.title).map(r=>({id:r.id, org:r.org,title:r.title,date:r.date,trial:r.trial,certificateUrl:r.certificateUrl||""}));
+  const titlesEarned = myResults.filter(r=>r.title).map(r=>({id:r.id, org:r.org,title:r.title,date:r.date,trial:r.trial,certificateUrl:r.certificateUrl||"", autoKey:r.autoKey||null}));
+  // ── Title auto-detection: suggestions not yet added or dismissed ─
+  const dogDismissedKeys = activeDog ? (dismissedTitleSuggestions[activeDog.id] || []) : [];
+  const dogAutoKeys = new Set(myResults.filter(r=>r.autoKey).map(r=>r.autoKey));
+  const titleSuggestions = activeDog
+    ? ORGS.flatMap(org => detectEarnedTitles(org, myResults)).filter(s => !dogAutoKeys.has(s.key) && !dogDismissedKeys.includes(s.key))
+    : [];
+  async function confirmTitleSuggestion(sugg) {
+    if (!activeDog) return;
+    const newResult = {
+      id: Date.now().toString(),
+      org: sugg.org,
+      trial: sugg.trialName || "Auto-detected from Results",
+      date: sugg.date || "",
+      level: "",
+      result: "Pass",
+      title: sugg.label,
+      notes: "Auto-detected from logged results",
+      photoUrl: "",
+      videoLink: "",
+      certificateUrl: "",
+      isTitleOnly: true,
+      autoKey: sugg.key,
+    };
+    const newResults = { ...allResults, [activeDog.id]: [...(allResults[activeDog.id]||[]), newResult] };
+    setAllResults(newResults);
+    await saveUserData({ results: newResults });
+  }
+  async function dismissTitleSuggestion(key) {
+    if (!activeDog) return;
+    const newDismissed = { ...dismissedTitleSuggestions, [activeDog.id]: [...(dismissedTitleSuggestions[activeDog.id]||[]), key] };
+    setDismissedTitleSuggestions(newDismissed);
+    await saveUserData({ dismissedTitles: newDismissed });
+  }
   const trialsByView = trialView==="past" ? trials.filter(t=>t.date < todayStr) : trials.filter(t=>t.date >= todayStr);
   const filtered = filterOrg === "All" ? trialsByView
     : filterOrg === "Entered" ? trialsByView.filter(t => getStatus(t.id)==="entered" || getStatus(t.id)==="waitlist")
@@ -722,7 +758,6 @@ export default function App() {
     const encoded = encodeURIComponent(location);
     window.open(`https://maps.google.com/?q=${encoded}`, "_blank");
   };
-
   // ════════════════════════════════════════════════════════════
   // AUTH LOADING
   // ════════════════════════════════════════════════════════════
@@ -731,7 +766,6 @@ export default function App() {
       <div style={{ color:"#fff", fontSize:16 }}>🐾 Loading...</div>
     </div>
   );
-
   // ════════════════════════════════════════════════════════════
   // AUTH SCREENS
   // ════════════════════════════════════════════════════════════
@@ -743,7 +777,6 @@ export default function App() {
           <div style={{ fontSize:22, fontWeight:"bold", color:"#5b21b6" }}>NoseWork Notebook</div>
           <div style={{ fontSize:13, color:"#888", marginTop:4 }}>Puppy Love · College Station, TX</div>
         </div>
-
         {authMode === "login" && (
           <form onSubmit={handleLogin}>
             <div style={formTitle}>{authLogging ? "Signing in..." : "Welcome back!"}</div>
@@ -760,7 +793,6 @@ export default function App() {
             </div>
           </form>
         )}
-
         {authMode === "signup" && (
           <form onSubmit={handleSignup}>
             <div style={formTitle}>Join the Puppy Love community!</div>
@@ -777,7 +809,6 @@ export default function App() {
             </div>
           </form>
         )}
-
         {authMode === "reset" && (
           <form onSubmit={handleReset}>
             <div style={formTitle}>Reset your password</div>
@@ -794,7 +825,6 @@ export default function App() {
       </div>
     </div>
   );
-
   // ════════════════════════════════════════════════════════════
   // ONBOARDING — first dog setup
   // ════════════════════════════════════════════════════════════
@@ -804,7 +834,6 @@ export default function App() {
       <div style={{ color:"#fff", fontSize:16 }}>🐾 Loading your dogs...</div>
     </div>
   );
-
   if (user && dataLoaded && dogs.length === 0) return (
     <div style={{ fontFamily:"Georgia,serif", background:"linear-gradient(135deg,#6b21a8,#7c3aed,#06b6d4)", minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
       <div style={{ background:"#fff", borderRadius:20, padding:28, maxWidth:420, width:"100%" }}>
@@ -813,7 +842,6 @@ export default function App() {
           <div style={{ fontSize:20, fontWeight:"bold", color:"#5b21b6" }}>Welcome{user.displayName ? `, ${user.displayName.split(" ")[0]}` : ""}!</div>
           <div style={{ fontSize:13, color:"#888", marginTop:4 }}>Let's set up your first dog</div>
         </div>
-
         {onboardStep === 0 && (
           <div>
             <label style={labelStyle}>Call Name *</label>
@@ -827,7 +855,6 @@ export default function App() {
             <button onClick={()=>setOnboardStep(1)} disabled={!onboardDog.callName} style={{ ...btnStyle("#7c3aed"), width:"100%", padding:12, marginTop:16, background:"linear-gradient(135deg,#7c3aed,#06b6d4)" }}>Next → Org IDs</button>
           </div>
         )}
-
         {onboardStep === 1 && (
           <div>
             <div style={{ fontWeight:"bold", fontSize:14, color:"#5b21b6", marginBottom:4 }}>Organization IDs</div>
@@ -845,7 +872,6 @@ export default function App() {
       </div>
     </div>
   );
-
   // ════════════════════════════════════════════════════════════
   // ADMIN PANEL
   // ════════════════════════════════════════════════════════════
@@ -866,22 +892,19 @@ export default function App() {
         ) : (
           <div>
             <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
-              {[["list","📋 All Trials"],["add","➕ Add Trial"],["seed","🚀 Seed DB"],["ideas","💡 Ideas"]].map(([t,l]) => (
+              {[["list","📋 All Trials"],["add","➕ Add Trial"],["seed","🚀 Seed DB"],["ideas","💡 Ideas"],["rules","📖 Rules"]].map(([t,l]) => (
                 <button key={t} onClick={()=>{setAdminTab(t);if(t!=="add"){setEditingTrialId(null);setTrialForm({org:"NACSW",name:"",date:"",location:"",level:"",entryOpens:"",entryDeadline:"",entryLink:"",premiumLink:"",notes:"",adminNotes:"",needsInfo:false});}}}
-
                   style={{ ...btnStyle(adminTab===t?"#7c3aed":"#aaa"), padding:"6px 14px", fontSize:13, ...(adminTab===t?{background:"linear-gradient(135deg,#7c3aed,#06b6d4)"}:{}) }}>{l}</button>
               ))}
             </div>
             {(adminTab==="add"||editingTrialId) && (
               <form onSubmit={saveAdminTrial} style={formStyle}>
                 <div style={formTitle}>{editingTrialId?"✏️ Edit Trial":"➕ New Trial"}</div>
-
                 {/* Needs Info flag */}
                 <label style={{ display:"flex", alignItems:"center", gap:10, cursor:"pointer", background: trialForm.needsInfo?"#fff8e1":"#f5f3ff", borderRadius:8, padding:"8px 12px", marginBottom:8, border:`1px solid ${trialForm.needsInfo?"#f59e0b":"#e9d5ff"}` }}>
                   <input type="checkbox" checked={trialForm.needsInfo||false} onChange={e=>setTrialForm({...trialForm,needsInfo:e.target.checked})} style={{ width:16, height:16 }}/>
                   <span style={{ fontSize:13, color: trialForm.needsInfo?"#b45309":"#5b21b6", fontWeight:"bold" }}>⚠️ Needs more info — flag for follow-up</span>
                 </label>
-
                 <label style={labelStyle}>Organization</label>
                 <select style={inputStyle} value={trialForm.org} onChange={e=>setTrialForm({...trialForm,org:e.target.value})}>{ORGS.map(o=><option key={o}>{o}</option>)}</select>
                 <label style={labelStyle}>Trial Name *</label>
@@ -915,6 +938,47 @@ export default function App() {
                 <div style={formTitle}>🚀 Seed Database</div>
                 <p style={{ fontSize:13, color:"#666" }}>Run once when first setting up. Uploads all {MASTER_TRIALS.length} trials.</p>
                 <button onClick={seedTrials} style={{ ...btnStyle("#c0392b"), marginTop:8 }}>Upload {MASTER_TRIALS.length} Trials to Firebase</button>
+              </div>
+            )}
+            {adminTab==="rules"&&(
+              <div>
+                <div style={{ fontWeight:"bold", fontSize:14, color:"#5b21b6", marginBottom:4 }}>📖 Rules & Regs — Full Rulebook Links</div>
+                <div style={{ fontSize:12, color:"#888", marginBottom:14 }}>
+                  Paste a link to each org's official rulebook PDF (host it on Google Drive, Dropbox, or the org's own site). This is the link shown at the bottom of each cheat sheet in the Rules & Regs tab. The cheat sheet text itself lives in the app code — ask your developer to update it when a rulebook changes.
+                </div>
+                {ORGS.map(org => {
+                  const rd = rulesDocs[org] || {};
+                  const isEditing = rulesEditOrg === org;
+                  return (
+                    <div key={org} style={{ background:ORG_BG[org], borderRadius:12, padding:14, marginBottom:10, borderLeft:`5px solid ${ORG_COLORS[org]}` }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+                        <OrgBadge org={org} size={13}/>
+                        {rd.lastUpdated && <span style={{ fontSize:11, color:"#999" }}>Updated: {rd.lastUpdated}</span>}
+                      </div>
+                      {isEditing ? (
+                        <div>
+                          <label style={labelStyle}>Rulebook PDF Link</label>
+                          <input style={inputStyle} placeholder="https://…" value={rulesEditLink} onChange={e=>setRulesEditLink(e.target.value)} autoFocus/>
+                          <label style={labelStyle}>Last Updated <span style={{ color:"#aaa", fontWeight:"normal" }}>(shown to users, e.g. "Aug 2026")</span></label>
+                          <input style={inputStyle} placeholder="e.g. Aug 2026" value={rulesEditUpdated} onChange={e=>setRulesEditUpdated(e.target.value)}/>
+                          <div style={{ display:"flex", gap:6, marginTop:6 }}>
+                            <button onClick={()=>saveRulesDoc(org)} style={{ ...btnStyle("#27ae60"), padding:"5px 14px", fontSize:12 }}>Save</button>
+                            <button onClick={()=>{setRulesEditOrg(null);setRulesEditLink("");setRulesEditUpdated("");}} style={{ ...btnStyle("#aaa"), padding:"5px 14px", fontSize:12 }}>Cancel</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+                          <div style={{ fontSize:12, color: rd.pdfUrl ? "#555" : "#bbb", wordBreak:"break-all", flex:1 }}>
+                            {rd.pdfUrl || "No link set yet"}
+                          </div>
+                          <button onClick={()=>{setRulesEditOrg(org);setRulesEditLink(rd.pdfUrl||"");setRulesEditUpdated(rd.lastUpdated||"");}} style={{ ...btnStyle("#7c3aed",true), padding:"3px 10px", fontSize:11, flexShrink:0 }}>
+                            {rd.pdfUrl ? "Edit" : "+ Add Link"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
             {adminTab==="ideas"&&(
@@ -999,8 +1063,7 @@ export default function App() {
                     ))}
                   </div>
                 </div>
-
-                {(adminFilter==="needsinfo" ? trials.filter(t=>t.needsInfo) 
+                {(adminFilter==="needsinfo" ? trials.filter(t=>t.needsInfo)
                   : adminFilter==="all" ? trials
                   : trials.filter(t=>t.org===adminFilter)
                 ).map(t => (
@@ -1016,7 +1079,6 @@ export default function App() {
                         {!t.entryDeadline&&<div style={{ fontSize:11, color:"#f59e0b", marginTop:1 }}>⚠️ No deadline set</div>}
                         {!t.entryOpens&&<div style={{ fontSize:11, color:"#f59e0b", marginTop:1 }}>⚠️ No entry open date set</div>}
                         {t.adminNotes&&<div style={{ fontSize:11, color:"#b45309", background:"#fffbeb", borderRadius:6, padding:"3px 8px", marginTop:4 }}>🔒 {t.adminNotes}</div>}
-
                         {/* Quick edit inline */}
                         {quickEditId===t.id ? (
                           <div style={{ marginTop:6 }}>
@@ -1059,7 +1121,6 @@ export default function App() {
       </div>
     </div>
   );
-
   // ════════════════════════════════════════════════════════════
   // MAIN APP
   // ════════════════════════════════════════════════════════════
@@ -1095,12 +1156,16 @@ export default function App() {
           ))}
         </div>
       </div>
-
       <div style={{ padding:"16px 14px", maxWidth:700, margin:"0 auto" }}>
-
         {/* DASHBOARD */}
         {tab==="Dashboard" && (
           <div>
+            {titleSuggestions.length>0&&(
+              <div onClick={()=>setTab("Titles")} style={{ background:"#fff8e1", border:"1px solid #fcd34d", borderRadius:10, padding:"12px 16px", marginBottom:12, cursor:"pointer" }}>
+                <div style={{ fontWeight:"bold", color:"#92400e" }}>🎉 {titleSuggestions.length} New Title{titleSuggestions.length>1?"s":""} to Add</div>
+                <div style={{ fontSize:12, color:"#b45309", marginTop:2 }}>Looks like {activeDog?.callName} qualified for a title based on your Results — tap to review on the Titles tab.</div>
+              </div>
+            )}
             {opensSoon.length>0&&(
               <div style={{ background:"#eff6ff", border:"1px solid #93c5fd", borderRadius:10, padding:"12px 16px", marginBottom:12 }}>
                 <div style={{ fontWeight:"bold", color:"#1d4ed8", marginBottom:6 }}>🔔 Entries Opening Soon</div>
@@ -1149,7 +1214,6 @@ export default function App() {
             }
           </div>
         )}
-
         {/* TRIALS */}
         {tab==="Trials" && (
           <div>
@@ -1255,8 +1319,6 @@ export default function App() {
             {filtered.length===0&&<div style={{ color:"#bbb", fontSize:13, textAlign:"center", marginTop:30 }}>No trials found! 🐾</div>}
           </div>
         )}
-
-
         {/* RESULTS */}
         {tab==="Results" && (
           <div>
@@ -1266,14 +1328,23 @@ export default function App() {
                 {showResultForm && !editingResultId ? "Cancel" : "+ Add Result"}
               </button>
             </div>
-
             {showResultForm && (
               <form onSubmit={addResult} style={formStyle}>
                 <div style={formTitle}>{editingResultId ? "✏️ Edit Result" : "Log Result"} — {activeDog?.callName}</div>
-
                 {/* Trial info */}
                 <label style={labelStyle}>Organization</label>
                 <select style={inputStyle} value={resultForm.org} onChange={e=>setResultForm({...resultForm,org:e.target.value})}>{ORGS.map(o=><option key={o}>{o}</option>)}</select>
+                {resultForm.org==="USCSS/Other" && (
+                  <>
+                    <label style={labelStyle}>Trial Type <span style={{ color:"#aaa", fontWeight:"normal" }}>(helps detect Classic titles)</span></label>
+                    <select style={inputStyle} value={resultForm.trialType||""} onChange={e=>setResultForm({...resultForm,trialType:e.target.value})}>
+                      <option value="">Not sure / doesn't matter</option>
+                      <option value="Classic">Classic (all 4 elements, same level, same day)</option>
+                      <option value="Variable">Variable (any mix)</option>
+                      <option value="Select">Select (max 2 classes)</option>
+                    </select>
+                  </>
+                )}
                 <label style={labelStyle}>Trial Name</label>
                 <input required style={inputStyle} value={resultForm.trial||""} onChange={e=>setResultForm({...resultForm,trial:e.target.value})} placeholder="e.g. USCSS Novice/Senior Classic" />
                 <label style={labelStyle}>Date</label>
@@ -1282,7 +1353,6 @@ export default function App() {
                 <input style={inputStyle} value={resultForm.title||""} onChange={e=>setResultForm({...resultForm,title:e.target.value})} placeholder="e.g. SBN, NW1…" />
                 <label style={labelStyle}>Overall Notes</label>
                 <textarea style={{...inputStyle,height:56}} value={resultForm.notes||""} onChange={e=>setResultForm({...resultForm,notes:e.target.value})} placeholder="How did the day go overall?"/>
-
                 {/* Ribbon photo */}
                 <label style={labelStyle}>📸 Ribbon Photo (optional)</label>
                 <div style={{ border:"1px dashed #ddd6fe", borderRadius:8, padding:10, background:"#faf5ff", marginBottom:4 }}>
@@ -1301,7 +1371,6 @@ export default function App() {
                     </label>
                   )}
                 </div>
-
                 {/* Certificate — only shown when a title is entered */}
                 {resultForm.title && (
                   <>
@@ -1335,9 +1404,7 @@ export default function App() {
                     </div>
                   </>
                 )}
-
                 {/* Video link moved to per-run level */}
-
                 {/* ── RUNS ── */}
                 <div style={{ margin:"14px 0 8px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                   <div style={{ fontWeight:"bold", fontSize:13, color:"#5b21b6" }}>Runs ({resultForm.runs?.length||0})</div>
@@ -1345,12 +1412,10 @@ export default function App() {
                     {showRunResultForm && editingRunResultIdx===null ? "Cancel" : "+ Add Run"}
                   </button>
                 </div>
-
                 {/* Run form */}
                 {showRunResultForm && (
                   <div style={{ background:"#f0fdff", border:"1px solid #a5f3fc", borderRadius:10, padding:12, marginBottom:10 }}>
                     <div style={{ fontWeight:"bold", fontSize:12, color:"#0e7490", marginBottom:8 }}>{editingRunResultIdx!==null ? "Edit Run" : `Run ${(resultForm.runs?.length||0)+1}`}</div>
-
                     {/* Element */}
                     <label style={labelStyle}>Search Element</label>
                     <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:6 }}>
@@ -1363,7 +1428,6 @@ export default function App() {
                         }}>{el}</button>
                       ))}
                     </div>
-
                     {/* Level + Result */}
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
                       <div>
@@ -1377,7 +1441,6 @@ export default function App() {
                         </select>
                       </div>
                     </div>
-
                     {/* Placement + Time */}
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
                       <div>
@@ -1393,7 +1456,18 @@ export default function App() {
                         <input style={inputStyle} value={runResultForm.time||""} onChange={e=>setRunResultForm({...runResultForm,time:e.target.value})} placeholder="e.g. 1:43"/>
                       </div>
                     </div>
-
+                    {/* Points + Faults — optional, used for title auto-detection */}
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                      <div>
+                        <label style={labelStyle}>Points <span style={{ color:"#aaa", fontWeight:"normal" }}>(if scored)</span></label>
+                        <input style={inputStyle} type="number" min="0" value={runResultForm.points||""} onChange={e=>setRunResultForm({...runResultForm,points:e.target.value})} placeholder="e.g. 95"/>
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Faults <span style={{ color:"#aaa", fontWeight:"normal" }}>(count)</span></label>
+                        <input style={inputStyle} type="number" min="0" value={runResultForm.faults||""} onChange={e=>setRunResultForm({...runResultForm,faults:e.target.value})} placeholder="e.g. 0"/>
+                      </div>
+                    </div>
+                    <div style={{ fontSize:10, color:"#888", marginTop:-2, marginBottom:6 }}>💡 Logging points/faults lets the app auto-suggest titles for you on the Titles tab.</div>
                     {/* Game toggle */}
                     <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", marginTop:8, marginBottom:4 }}>
                       <input type="checkbox" checked={runResultForm.isGame||false} onChange={e=>setRunResultForm({...runResultForm,isGame:e.target.checked, gameName:e.target.checked?runResultForm.gameName:""})}/>
@@ -1402,12 +1476,10 @@ export default function App() {
                     {runResultForm.isGame && (
                       <input style={inputStyle} value={runResultForm.gameName||""} onChange={e=>setRunResultForm({...runResultForm,gameName:e.target.value})} placeholder="Game name e.g. Hide of Hides, Handler Discrimination…"/>
                     )}
-
                     <label style={labelStyle}>Run Notes</label>
                     <input style={inputStyle} value={runResultForm.notes||""} onChange={e=>setRunResultForm({...runResultForm,notes:e.target.value})} placeholder="What happened on this run…"/>
                     <label style={labelStyle}>🎥 Run Video Link (optional)</label>
                     <input style={inputStyle} value={runResultForm.videoUrl||""} onChange={e=>setRunResultForm({...runResultForm,videoUrl:e.target.value})} placeholder="https://drive.google.com/… or YouTube URL"/>
-
                     <div style={{ display:"flex", gap:6, marginTop:8 }}>
                       <button type="button" onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); saveRunResult(); }} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", fontSize:12, padding:"5px 14px" }}>
                         {editingRunResultIdx!==null ? "Save Run" : "Add Run"}
@@ -1416,7 +1488,6 @@ export default function App() {
                     </div>
                   </div>
                 )}
-
                 {/* Runs list in form */}
                 {(resultForm.runs||[]).map((run,idx)=>(
                   <div key={idx} style={{ background:"#faf5ff", borderRadius:8, padding:"8px 12px", marginBottom:6, border:"1px solid #e9d5ff", display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
@@ -1429,6 +1500,8 @@ export default function App() {
                         {run.isGame&&<span style={{ background:"#fef3c7", color:"#b45309", borderRadius:20, padding:"1px 8px", fontSize:10 }}>🎮 {run.gameName||"Game"}</span>}
                         {run.place&&<span style={{ fontSize:10, color:"#888" }}>📊 {run.place}{run.outOf?`/${run.outOf}`:""}</span>}
                         {run.time&&<span style={{ fontSize:10, color:"#888" }}>⏱ {run.time}</span>}
+                        {run.points!==""&&run.points!=null&&<span style={{ fontSize:10, color:"#0369a1" }}>🎯 {run.points}pts</span>}
+                        {run.faults!==""&&run.faults!=null&&<span style={{ fontSize:10, color:"#b45309" }}>⚠ {run.faults}f</span>}
                       </div>
                       {run.notes&&<div style={{ fontSize:10, color:"#888" }}>{run.notes}</div>}
                       {run.videoUrl&&<div style={{ fontSize:10, color:"#16a34a", marginTop:2 }}>🎥 Video linked</div>}
@@ -1439,14 +1512,12 @@ export default function App() {
                     </div>
                   </div>
                 ))}
-
                 <div style={{ display:"flex", gap:8, marginTop:14 }}>
                   <button type="submit" style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)" }}>{editingResultId?"Save Changes":"Save Result"}</button>
                   <button type="button" onClick={()=>{ setShowResultForm(false); setEditingResultId(null); setResultForm(blankResultForm()); setShowRunResultForm(false); }} style={btnStyle("#aaa")}>Cancel</button>
                 </div>
               </form>
             )}
-
             {/* Results list */}
             {myEventResults.length > 0 && (
               <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:8 }}>
@@ -1514,7 +1585,6 @@ export default function App() {
                       <span style={{ fontSize:14, color:"#bbb", marginLeft:2 }}>{isExpanded ? "▲" : "▼"}</span>
                     </div>
                   </div>
-
                   {/* ── Expanded detail ── */}
                   {isExpanded && (
                     <div style={{ padding:"0 14px 14px" }}>
@@ -1531,6 +1601,8 @@ export default function App() {
                                 {run.isGame&&<span style={{ background:"#fef3c7", color:"#b45309", borderRadius:20, padding:"1px 8px", fontSize:10 }}>🎮 {run.gameName||"Game"}</span>}
                                 {run.place&&<span style={{ fontSize:10, color:"#555", fontWeight:"bold" }}>📊 {run.place}{run.outOf?` of ${run.outOf}`:""}</span>}
                                 {run.time&&<span style={{ fontSize:10, color:"#666" }}>⏱ {run.time}</span>}
+                                {run.points!==""&&run.points!=null&&<span style={{ fontSize:10, color:"#0369a1" }}>🎯 {run.points}pts</span>}
+                                {run.faults!==""&&run.faults!=null&&<span style={{ fontSize:10, color:"#b45309" }}>⚠ {run.faults}f</span>}
                               </div>
                               {run.notes&&<div style={{ fontSize:10, color:"#888", marginTop:2, fontStyle:"italic" }}>{run.notes}</div>}
                               {run.videoUrl&&(
@@ -1562,7 +1634,6 @@ export default function App() {
             {myEventResults.length===0&&<div style={{ color:"#bbb", fontSize:13, textAlign:"center", marginTop:30 }}>No results logged yet!</div>}
           </div>
         )}
-
         {/* TITLES */}
         {tab==="Titles" && (
           <div>
@@ -1572,7 +1643,25 @@ export default function App() {
                 {showTitleForm && !editingTitleId ? "Cancel" : "+ Add Existing Title"}
               </button>
             </div>
-
+            {/* Auto-detected title suggestions */}
+            {titleSuggestions.length > 0 && (
+              <div style={{ marginBottom:16 }}>
+                {titleSuggestions.map(s => (
+                  <div key={s.key} style={{ background:"#fff8e1", border:"1px solid #fcd34d", borderRadius:12, padding:"12px 14px", marginBottom:8, display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+                    <div style={{ flex:1, minWidth:160 }}>
+                      <div style={{ fontWeight:"bold", fontSize:13, color:"#92400e" }}>🎉 Looks like {activeDog?.callName} earned: {s.label}</div>
+                      <div style={{ fontSize:11, color:"#b45309", marginTop:2 }}>
+                        <OrgBadge org={s.org}/> {s.trialName?` · ${s.trialName}`:""}{s.date?` · ${s.date}`:""} — based on your logged Results
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+                      <button onClick={()=>confirmTitleSuggestion(s)} style={{ ...btnStyle("#27ae60"), padding:"5px 12px", fontSize:11 }}>Add to Titles ✓</button>
+                      <button onClick={()=>dismissTitleSuggestion(s.key)} style={{ ...btnStyle("#aaa",true), padding:"5px 12px", fontSize:11 }}>Dismiss</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
             {showTitleForm && (
               <form onSubmit={addManualTitle} style={formStyle}>
                 <div style={formTitle}>{editingTitleId ? "✏️ Edit Title" : "Add an Existing Title"}</div>
@@ -1622,7 +1711,6 @@ export default function App() {
                 </div>
               </form>
             )}
-
             {ORGS.map(org=>{
               const orgTitles = titlesEarned.filter(t=>t.org===org);
               return (
@@ -1639,7 +1727,10 @@ export default function App() {
                             <div onClick={toggleExpand} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", cursor:"pointer" }}>
                               <span style={{ fontSize:20 }}>🏅</span>
                               <div style={{ flex:1 }}>
-                                <div style={{ fontWeight:"bold" }}>{t.title}</div>
+                                <div style={{ fontWeight:"bold", display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+                                  {t.title}
+                                  {t.autoKey && <span style={{ fontSize:9, background:"#e8f8ee", color:"#27ae60", borderRadius:20, padding:"1px 7px", fontWeight:"bold" }}>✓ Auto-detected</span>}
+                                </div>
                                 <div style={{ fontSize:11, color:"#888" }}>
                                   {t.trial}{t.trial && t.date ? " · " : ""}{t.date}
                                   {t.trial==="Pre-app title" && !t.date ? <span style={{ color:"#bbb" }}> · manually entered</span> : ""}
@@ -1666,7 +1757,56 @@ export default function App() {
             })}
           </div>
         )}
-
+        {/* RULES & REGS */}
+        {tab==="Rules & Regs" && (
+          <div>
+            <div style={{ fontWeight:"bold", fontSize:16, marginBottom:4, color:"#5b21b6" }}>📖 Rules & Regs</div>
+            <div style={{ fontSize:13, color:"#888", marginBottom:16 }}>
+              A fast-pass cheat sheet for each org — classes, what to expect in the ring, how to move up, and common faults. Tap an org to expand it. Full official rulebook linked at the bottom of each section.
+            </div>
+            {ORGS.map(org => {
+              const isExpanded = expandedRules.has(org);
+              const toggleExpand = () => setExpandedRules(prev => { const n = new Set(prev); isExpanded ? n.delete(org) : n.add(org); return n; });
+              const sheet = CHEAT_SHEETS[org];
+              const rd = rulesDocs[org] || {};
+              return (
+                <div key={org} style={{ background:ORG_BG[org], borderRadius:12, marginBottom:12, borderLeft:`5px solid ${ORG_COLORS[org]}`, overflow:"hidden" }}>
+                  <div onClick={toggleExpand} style={{ padding:"14px 16px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      <OrgBadge org={org} size={13}/>
+                      <span style={{ fontWeight:"bold", fontSize:14, color:"#1e1b4b" }}>Rules & Regs Cheat Sheet</span>
+                    </div>
+                    <span style={{ fontSize:14, color:"#bbb" }}>{isExpanded ? "▲" : "▼"}</span>
+                  </div>
+                  {isExpanded && (
+                    <div style={{ padding:"0 16px 16px" }}>
+                      {sheet ? sheet.sections.map((section,si) => (
+                        <RuleSection key={si} heading={section.heading} bullets={section.bullets} color={ORG_COLORS[org]}/>
+                      )) : (
+                        <div style={{ color:"#bbb", fontSize:13 }}>Cheat sheet coming soon for {org}.</div>
+                      )}
+                      <div style={{ marginTop:10, paddingTop:12, borderTop:`1px solid ${ORG_COLORS[org]}33` }}>
+                        {rd.pdfUrl ? (
+                          <button onClick={()=>window.open(rd.pdfUrl,"_blank")} style={{
+                            background:"#fff", color:ORG_COLORS[org], border:`1px solid ${ORG_COLORS[org]}`,
+                            borderRadius:20, padding:"7px 16px", fontSize:12, cursor:"pointer", fontWeight:"bold",
+                            display:"flex", alignItems:"center", gap:6
+                          }}>
+                            📄 View Full {org} Rulebook →
+                          </button>
+                        ) : (
+                          <div style={{ fontSize:12, color:"#bbb", fontStyle:"italic" }}>Full rulebook link coming soon.</div>
+                        )}
+                        {rd.lastUpdated && <div style={{ fontSize:10, color:"#aaa", marginTop:6 }}>Rulebook last updated: {rd.lastUpdated}</div>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {rulesDocsLoading && <div style={{ textAlign:"center", color:"#bbb", fontSize:13, padding:10 }}>Syncing…</div>}
+          </div>
+        )}
         {/* MY DOGS */}
         {tab==="My Dogs" && (
           <div>
@@ -1679,7 +1819,6 @@ export default function App() {
                 ))}
               </div>
             )}
-
             {activeDog&&(editingDogId===activeDog.id?(
               <form onSubmit={saveDog} style={formStyle}>
                 <div style={formTitle}>Edit {dogForm.callName||"Dog"}</div>
@@ -1768,11 +1907,9 @@ export default function App() {
                 {showTrainingForm && !editingTrainingId ? "Cancel" : "+ Log Session"}
               </button>
             </div>
-
             {showTrainingForm && (
               <form onSubmit={addTrainingEntry} style={formStyle}>
                 <div style={formTitle}>{editingTrainingId ? "✏️ Edit Session" : "New Training Session"}</div>
-
                 {/* Date + Time + Type */}
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
                   <div><label style={labelStyle}>Date</label><input type="date" style={inputStyle} value={trainingForm.date} onChange={e=>setTrainingForm({...trainingForm,date:e.target.value})}/></div>
@@ -1784,11 +1921,9 @@ export default function App() {
                     </select>
                   </div>
                 </div>
-
                 <div style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:8, padding:"8px 12px", margin:"10px 0", fontSize:12, color:"#0369a1" }}>
                   💡 Just saw it on WhatsApp? Fill in date, time and type then hit Save — add runs and details later by tapping Edit!
                 </div>
-
                 <label style={labelStyle}>Location</label>
                 <input style={inputStyle} value={trainingForm.location||""} onChange={e=>setTrainingForm({...trainingForm,location:e.target.value})} placeholder="Training center, home, park…"/>
                 <label style={labelStyle}>Session Notes</label>
@@ -1802,7 +1937,6 @@ export default function App() {
                   </div>
                   <div><label style={labelStyle}>Video Link (optional)</label><input style={inputStyle} value={trainingForm.videoLink||""} onChange={e=>setTrainingForm({...trainingForm,videoLink:e.target.value})} placeholder="Google Drive or YouTube URL"/></div>
                 </div>
-
                 {/* ── RUNS ── */}
                 <div style={{ margin:"14px 0 8px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                   <div style={{ fontWeight:"bold", fontSize:13, color:"#5b21b6" }}>Runs ({trainingForm.runs?.length||0})</div>
@@ -1810,12 +1944,10 @@ export default function App() {
                     {showRunForm && editingRunIdx===null ? "Cancel" : "+ Add Run"}
                   </button>
                 </div>
-
                 {/* Run form */}
                 {showRunForm && (
                   <div style={{ background:"#f0fdff", border:"1px solid #a5f3fc", borderRadius:10, padding:12, marginBottom:10 }}>
                     <div style={{ fontWeight:"bold", fontSize:12, color:"#0e7490", marginBottom:8 }}>{editingRunIdx!==null ? "Edit Run" : `Run ${(trainingForm.runs?.length||0)+1}`}</div>
-
                     {/* Odors — multi select */}
                     <label style={labelStyle}>Odor(s) — tap to select multiple</label>
                     <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:6 }}>
@@ -1828,7 +1960,6 @@ export default function App() {
                         }}>{o}</button>
                       ))}
                     </div>
-
                     {/* Converging scents — only when 2+ odors selected */}
                     {runForm.odors.length >= 2 && (
                       <div style={{ marginBottom:6 }}>
@@ -1840,7 +1971,6 @@ export default function App() {
                         }}>🌀 Converging Scents {runForm.converging?"✓":""}</button>
                       </div>
                     )}
-
                     {/* Hide count */}
                     <label style={labelStyle}>Hide Count</label>
                     <div style={{ display:"flex", gap:5, marginBottom:6 }}>
@@ -1853,7 +1983,6 @@ export default function App() {
                         }}>{h}</button>
                       ))}
                     </div>
-
                     {/* Hide type */}
                     <label style={labelStyle}>Hide Type</label>
                     <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:6 }}>
@@ -1866,7 +1995,6 @@ export default function App() {
                         }}>{h}</button>
                       ))}
                     </div>
-
                     {/* Blind outcome — only when Blind or Mixed */}
                     {(runForm.hideType==="Blind"||runForm.hideType==="Mixed") && (
                       <>
@@ -1889,7 +2017,6 @@ export default function App() {
                         </div>
                       </>
                     )}
-
                     {/* Search elements — multi select */}
                     <label style={labelStyle}>Search Element(s) — tap to select multiple</label>
                     <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:8 }}>
@@ -1902,12 +2029,10 @@ export default function App() {
                         }}>{el}</button>
                       ))}
                     </div>
-
                     <label style={labelStyle}>Run Notes (optional)</label>
                     <input style={inputStyle} value={runForm.notes||""} onChange={e=>setRunForm({...runForm,notes:e.target.value})} placeholder="What happened on this run…"/>
                     <label style={labelStyle}>🎥 Run Video Link (optional)</label>
                     <input style={inputStyle} value={runForm.videoUrl||""} onChange={e=>setRunForm({...runForm,videoUrl:e.target.value})} placeholder="https://drive.google.com/… or YouTube URL"/>
-
                     <div style={{ display:"flex", gap:6, marginTop:8 }}>
                       <button type="button" onClick={(e)=>{e.preventDefault();e.stopPropagation();saveRun();}} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", fontSize:12, padding:"5px 14px" }}>
                         {editingRunIdx!==null?"Save Run":"Add Run"}
@@ -1916,7 +2041,6 @@ export default function App() {
                     </div>
                   </div>
                 )}
-
                 {/* Runs list */}
                 {(trainingForm.runs||[]).map((run,idx)=>(
                   <div key={idx} style={{ background:"#faf5ff", borderRadius:8, padding:"8px 12px", marginBottom:6, border:"1px solid #e9d5ff", display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
@@ -1938,21 +2062,18 @@ export default function App() {
                     </div>
                   </div>
                 ))}
-
                 <div style={{ display:"flex", gap:8, marginTop:14 }}>
                   <button type="submit" style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)" }}>{editingTrainingId ? "Save Changes" : "Save Session"}</button>
                   <button type="button" onClick={()=>{ setShowTrainingForm(false); setEditingTrainingId(null); setTrainingForm(blankTrainingForm()); setShowRunForm(false); }} style={btnStyle("#aaa")}>Cancel</button>
                 </div>
               </form>
             )}
-
             {/* Stats row */}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginBottom:16 }}>
               <StatCard label="Total Sessions" value={myTraining.length} icon="🎯"/>
               <StatCard label="This Month" value={myTraining.filter(t=>t.date?.slice(0,7)===new Date().toISOString().slice(0,7)).length} icon="📅"/>
               <StatCard label="Total Runs" value={myTraining.reduce((a,t)=>a+(t.runs?.length||0),0)} icon="🏃"/>
             </div>
-
             {myTraining.length===0
               ? <div style={{ color:"#bbb", fontSize:13, textAlign:"center", marginTop:30 }}>No training logged yet — after each session jot a quick note here! 🐾</div>
               : <>
@@ -1993,7 +2114,6 @@ export default function App() {
                             <span style={{ fontSize:14, color:"#bbb", marginLeft:2 }}>{isExpanded ? "▲" : "▼"}</span>
                           </div>
                         </div>
-
                         {/* ── Expanded detail ── */}
                         {isExpanded && (
                           <div style={{ padding:"0 14px 14px" }}>
@@ -2037,21 +2157,17 @@ export default function App() {
             }
           </div>
         )}
-
         {/* ACCOUNT */}
         {tab==="Account" && (
           <div>
             <div style={{ fontWeight:"bold", fontSize:16, marginBottom:16, color:"#5b21b6" }}>👤 Account Settings</div>
-
             {accountMsg && <div style={{ background:"#e8f8ee", color:"#27ae60", borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:13 }}>{accountMsg}</div>}
             {accountError && <div style={{ background:"#ffeaea", color:"#c0392b", borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:13 }}>{accountError}</div>}
-
             <div style={{ background:"#fff", borderRadius:12, padding:14, marginBottom:12, border:"1px solid #e9d5ff" }}>
               <div style={{ fontSize:13, color:"#888", marginBottom:4 }}>Signed in as</div>
               <div style={{ fontWeight:"bold", color:"#1e1b4b" }}>{user.displayName || "No name set"}</div>
               <div style={{ fontSize:13, color:"#666" }}>{user.email}</div>
             </div>
-
             {/* Change Name */}
             <form onSubmit={updateAccountName} style={formStyle}>
               <div style={formTitle}>Change Display Name</div>
@@ -2059,7 +2175,6 @@ export default function App() {
               <input required style={inputStyle} placeholder="Your name" value={accountForm.name} onChange={e=>{ setAccountMsg(""); setAccountError(""); setAccountForm({...accountForm,name:e.target.value}); }} />
               <button type="submit" style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", marginTop:10 }}>Update Name</button>
             </form>
-
             {/* Change Email */}
             <form onSubmit={updateAccountEmail} style={formStyle}>
               <div style={formTitle}>Change Email</div>
@@ -2069,7 +2184,6 @@ export default function App() {
               <input required type="password" style={inputStyle} placeholder="••••••••" value={accountForm.currentPassword} onChange={e=>setAccountForm({...accountForm,currentPassword:e.target.value})} />
               <button type="submit" style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", marginTop:10 }}>Update Email</button>
             </form>
-
             {/* Change Password */}
             <form onSubmit={updateAccountPassword} style={formStyle}>
               <div style={formTitle}>Change Password</div>
@@ -2079,10 +2193,8 @@ export default function App() {
               <input required type="password" style={inputStyle} placeholder="At least 6 characters" value={accountForm.newPassword} onChange={e=>setAccountForm({...accountForm,newPassword:e.target.value})} />
               <button type="submit" style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", marginTop:10 }}>Update Password</button>
             </form>
-
             {/* Sign out */}
             <button onClick={handleLogout} style={{ ...btnStyle("#aaa",true), width:"100%", padding:12, marginBottom:12 }}>Sign Out</button>
-
             {/* Delete Account */}
             {!showDeleteAccount ? (
               <button onClick={()=>setShowDeleteAccount(true)} style={{ ...btnStyle("#c0392b",true), width:"100%", padding:12, fontSize:13 }}>Delete My Account</button>
@@ -2100,7 +2212,6 @@ export default function App() {
             )}
           </div>
         )}
-
         {/* IDEAS / FEATURE REQUESTS */}
         {tab==="Ideas 💡" && (
           <div>
@@ -2108,7 +2219,6 @@ export default function App() {
             <div style={{ fontSize:13, color:"#888", marginBottom:16 }}>
               Got an idea to make NoseWork Notebook better? Submit it, vote on others, and watch it move through the pipeline.
             </div>
-
             {/* Slot counter */}
             <div style={{ background: myOpenIdeas.length>=5 ? "#fef2f2" : "#f5f3ff", border:`1px solid ${myOpenIdeas.length>=5?"#fca5a5":"#e9d5ff"}`, borderRadius:10, padding:"10px 14px", marginBottom:16, fontSize:12, color: myOpenIdeas.length>=5?"#b91c1c":"#7c3aed" }}>
               {myOpenIdeas.length>=5
@@ -2116,7 +2226,6 @@ export default function App() {
                 : `💡 You have ${5 - myOpenIdeas.length} idea slot${5-myOpenIdeas.length===1?"":"s"} remaining`
               }
             </div>
-
             {/* Submit form */}
             {myOpenIdeas.length < 5 && (
               <form onSubmit={submitIdea} style={{ ...formStyle, marginBottom:20 }}>
@@ -2137,7 +2246,6 @@ export default function App() {
                 </div>
               </form>
             )}
-
             {/* Ideas list */}
             {featureRequests.length === 0
               ? <div style={{ color:"#bbb", fontSize:13, textAlign:"center", marginTop:20 }}>No ideas yet — be the first! 🐾</div>
@@ -2185,15 +2293,12 @@ export default function App() {
                   );
               })
             }
-
             <div style={{ textAlign:"center", fontSize:12, color:"#bbb", paddingBottom:8, marginTop:8 }}>
               Thank you for helping make NoseWork Notebook better 🐾
             </div>
           </div>
         )}
-
       </div>
-
       {/* ── What's New Modal ─────────────────────────────────── */}
       {showWhatsNew && (
         <div onClick={dismissWhatsNew} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1000, display:"flex", alignItems:"flex-end", justifyContent:"center", padding:"0 0 0 0" }}>
@@ -2236,7 +2341,6 @@ export default function App() {
     </div>
   );
 }
-
 function OrgBadge({org,size=11}) {
   return <span style={{ background:(ORG_COLORS[org]||"#999")+"22", color:ORG_COLORS[org]||"#999", borderRadius:20, padding:"2px 8px", fontSize:size, fontWeight:"bold", display:"inline-block" }}>{org}</span>;
 }
@@ -2246,6 +2350,27 @@ function StatCard({label,value,icon,small}) {
       <div style={{ fontSize:small?20:26 }}>{icon}</div>
       <div style={{ fontWeight:"bold", fontSize:small?18:22, color:"#5b21b6" }}>{value}</div>
       <div style={{ fontSize:10, color:"#999", marginTop:2 }}>{label}</div>
+    </div>
+  );
+}
+// Renders inline **bold** markers inside a cheat-sheet bullet string as <b> tags.
+function BoldText({text}) {
+  const parts = text.split(/\*\*(.+?)\*\*/g);
+  return <>{parts.map((part,i) => i%2===1 ? <b key={i}>{part}</b> : part)}</>;
+}
+// A single section of a Rules & Regs cheat sheet (heading + bullet list).
+function RuleSection({heading, bullets, color}) {
+  return (
+    <div style={{ marginBottom:14 }}>
+      <div style={{ fontWeight:"bold", fontSize:13, color:"#5b21b6", marginBottom:6 }}>{heading}</div>
+      <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+        {bullets.map((b,i) => (
+          <div key={i} style={{ display:"flex", gap:8, alignItems:"flex-start", background:"rgba(255,255,255,0.6)", borderRadius:8, padding:"7px 10px" }}>
+            <span style={{ color, fontSize:12, lineHeight:"18px" }}>•</span>
+            <span style={{ fontSize:12.5, color:"#333", lineHeight:1.5 }}><BoldText text={b}/></span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -2306,7 +2431,6 @@ function OrgFilter({value, onChange, dogRegs={}}) {
     </div>
   );
 }
-
 const inputStyle = { width:"100%", padding:"8px 10px", borderRadius:8, border:"1px solid #ddd", fontSize:14, boxSizing:"border-box", marginBottom:2, background:"#fafafa" };
 const labelStyle = { fontSize:12, color:"#666", display:"block", marginBottom:4, marginTop:8 };
 const formStyle  = { background:"#fff", borderRadius:14, padding:18, marginBottom:18, boxShadow:"0 2px 12px rgba(0,0,0,0.08)", border:"1px solid #e9d5ff" };
