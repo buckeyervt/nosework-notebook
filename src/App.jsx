@@ -368,15 +368,23 @@ export default function App() {
     await setDoc(doc(db, "featureRequests", idea.id), { status, adminComment: comment }, { merge: true });
   }
   // ── Rules & Regs — admin save ──────────────────────────────────
+  // Firestore doc IDs can't contain "/", but "USCSS/Other" does — sanitize
+  // the org name into a safe doc ID while keeping the real name as a field.
+  function rulesDocId(org) { return org.replace(/\//g, "-"); }
   async function saveRulesDoc(org) {
-    await setDoc(doc(db, "rulesDocs", org), {
-      org,
-      pdfUrl: rulesEditLink.trim(),
-      lastUpdated: rulesEditUpdated.trim(),
-    }, { merge: true });
-    setRulesEditOrg(null);
-    setRulesEditLink("");
-    setRulesEditUpdated("");
+    try {
+      await setDoc(doc(db, "rulesDocs", rulesDocId(org)), {
+        org,
+        pdfUrl: rulesEditLink.trim(),
+        lastUpdated: rulesEditUpdated.trim(),
+      }, { merge: true });
+      setRulesEditOrg(null);
+      setRulesEditLink("");
+      setRulesEditUpdated("");
+    } catch (err) {
+      console.error("Save rules doc error:", err);
+      alert("Couldn't save — please try again.");
+    }
   }
   // ── Account management ───────────────────────────────────────
   async function updateAccountName(e) {
@@ -947,7 +955,7 @@ export default function App() {
                   Paste a link to each org's official rulebook PDF (host it on Google Drive, Dropbox, or the org's own site). This is the link shown at the bottom of each cheat sheet in the Rules & Regs tab. The cheat sheet text itself lives in the app code — ask your developer to update it when a rulebook changes.
                 </div>
                 {ORGS.map(org => {
-                  const rd = rulesDocs[org] || {};
+                  const rd = rulesDocs[rulesDocId(org)] || {};
                   const isEditing = rulesEditOrg === org;
                   return (
                     <div key={org} style={{ background:ORG_BG[org], borderRadius:12, padding:14, marginBottom:10, borderLeft:`5px solid ${ORG_COLORS[org]}` }}>
@@ -1768,7 +1776,7 @@ export default function App() {
               const isExpanded = expandedRules.has(org);
               const toggleExpand = () => setExpandedRules(prev => { const n = new Set(prev); isExpanded ? n.delete(org) : n.add(org); return n; });
               const sheet = CHEAT_SHEETS[org];
-              const rd = rulesDocs[org] || {};
+              const rd = rulesDocs[rulesDocId(org)] || {};
               return (
                 <div key={org} style={{ background:ORG_BG[org], borderRadius:12, marginBottom:12, borderLeft:`5px solid ${ORG_COLORS[org]}`, overflow:"hidden" }}>
                   <div onClick={toggleExpand} style={{ padding:"14px 16px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
