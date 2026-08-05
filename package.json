@@ -9,6 +9,9 @@
     "firebase": "^10.7.0",
     "react-scripts": "5.0.1"
   },
+  "overrides": {
+    "schema-utils": "^4.3.0"
+  },
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build"
