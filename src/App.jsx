@@ -26,12 +26,24 @@ const ORG_IDS = [
   { org: "USCSS/Other",  key: "uscss",  label: "USCSS Member #",            placeholder: "e.g. your USCSS ID" },
 ];
 const auth = getAuth();
-const TABS = ["Dashboard", "Trials", "Results", "Titles", "Training", "My Dogs", "Rules & Regs", "Account", "Ideas 💡"];
+const TRIALING_TABS = ["Dashboard", "Trials", "Results", "Titles", "Training", "My Dogs", "Rules & Regs", "Account", "Ideas 💡"];
+const TRAINING_TABS = ["Dashboard", "Class Progress", "Training", "My Dogs", "Rules & Regs", "Account", "Ideas 💡"];
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.9";
+const APP_VERSION = "1.10";
 const WHATS_NEW = [
+  {
+    version: "1.10",
+    date: "August 2026",
+    title: "In Training Dogs & Class Progress",
+    items: [
+      "🐾 Dogs can now be marked \"Trialing\" or \"In Training\" — set it when you add a new dog, or change it anytime from My Dogs. All existing dogs default to Trialing.",
+      "🎓 In Training dogs get a new Class Progress tab instead of Trials/Results/Titles — track attendance and notes across the 6-level, 4-class-per-level foundations program.",
+      "📸 A graduation photo spot appears at the end of the program once your dog is ready to celebrate finishing it.",
+      "🏠 The Dashboard now shows a class-progress summary for In Training dogs instead of trial stats.",
+    ],
+  },
   {
     version: "1.9",
     date: "August 2026",
@@ -124,7 +136,15 @@ const WHATS_NEW = [
     ],
   },
 ];
-const blankDog = () => ({ id: Date.now().toString(), callName:"", name:"", breed:"", dob:"", nacsw:"", akc:"", ukc:"", uscss:"" });
+const blankDog = () => ({ id: Date.now().toString(), callName:"", name:"", breed:"", dob:"", nacsw:"", akc:"", ukc:"", uscss:"", status:"trialing" });
+// Fixed curriculum used for "In Training" dogs — 6 levels, 4 classes each.
+const blankClassProgress = () => ({
+  levels: Array.from({ length: 6 }, (_, i) => ({
+    level: i + 1,
+    classes: Array.from({ length: 4 }, (_, j) => ({ classNum: j + 1, attended: false, notes: "" })),
+  })),
+  graduationPhotoUrl: "",
+});
 export default function App() {
   // ── Auth state ───────────────────────────────────────────────
   const [user, setUser]               = useState(null);
@@ -203,6 +223,10 @@ export default function App() {
   const [editingRunIdx, setEditingRunIdx]       = useState(null);
   const [editingDogId, setEditingDogId]     = useState(null);
   const [dogForm, setDogForm]               = useState({});
+  // ── Class Progress (In Training dogs) ─────────────────────────
+  const [allClassProgress, setAllClassProgress] = useState({});
+  const [expandedLevels, setExpandedLevels] = useState(new Set([1]));
+  const [gradPhotoFile, setGradPhotoFile]   = useState(null);
   const [deleteConfirm, setDeleteConfirm]   = useState(null);
   const [onboardStep, setOnboardStep]       = useState(0);
   const [onboardDog, setOnboardDog]         = useState(blankDog());
@@ -213,6 +237,11 @@ export default function App() {
   const [showDeleteAccount, setShowDeleteAccount] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
   const activeDog = dogs.find(d => d.id === activeDogId) || dogs[0];
+  const dogStatus = activeDog?.status || "trialing";
+  const TABS = dogStatus === "training" ? TRAINING_TABS : TRIALING_TABS;
+  useEffect(() => {
+    if (!TABS.includes(tab)) setTab("Dashboard");
+  }, [dogStatus]);
   const today = new Date();
   const todayStr = today.toLocaleDateString("en-CA"); // YYYY-MM-DD in local time
   // ── Auth listener ────────────────────────────────────────────
@@ -276,6 +305,7 @@ export default function App() {
         setPhotos(data.photos || {});
         setAllTraining(data.training || {});
         setDismissedTitleSuggestions(data.dismissedTitles || {});
+        setAllClassProgress(data.classProgress || {});
         setActiveDogId(current => {
           if (current && loadedDogs.find(d => d.id === current)) return current;
           if (data.activeDogId && loadedDogs.find(d => d.id === data.activeDogId)) return data.activeDogId;
@@ -342,7 +372,7 @@ export default function App() {
   async function handleLogout() {
     await signOut(auth);
     setDogs([]); setActiveDogId(null); setRegistrations({});
-    setAllResults({}); setPhotos({}); setAllTraining({}); setDataLoaded(false); setUser(null);
+    setAllResults({}); setPhotos({}); setAllTraining({}); setAllClassProgress({}); setDataLoaded(false); setUser(null);
   }
   function dismissWhatsNew() {
     localStorage.setItem("nwn_seen_version", APP_VERSION);
@@ -479,8 +509,9 @@ export default function App() {
   async function finishOnboarding() {
     const dog = { ...onboardDog, id: Date.now().toString() };
     const newDogs = [dog];
-    setDogs(newDogs); setActiveDogId(dog.id);
-    await saveUserData({ dogs: newDogs, activeDogId: dog.id, registrations:{}, results:{}, photos:{} });
+    const newClassProgress = { [dog.id]: blankClassProgress() };
+    setDogs(newDogs); setActiveDogId(dog.id); setAllClassProgress(newClassProgress);
+    await saveUserData({ dogs: newDogs, activeDogId: dog.id, registrations:{}, results:{}, photos:{}, classProgress: newClassProgress });
   }
   // ── Dog management ───────────────────────────────────────────
   async function saveDog(e) {
@@ -492,9 +523,10 @@ export default function App() {
   async function addDog() {
     const dog = blankDog();
     const newDogs = [...dogs, dog];
-    setDogs(newDogs); setActiveDogId(dog.id);
+    const newClassProgress = { ...allClassProgress, [dog.id]: blankClassProgress() };
+    setDogs(newDogs); setActiveDogId(dog.id); setAllClassProgress(newClassProgress);
     setEditingDogId(dog.id); setDogForm(dog);
-    await saveUserData({ dogs: newDogs, activeDogId: dog.id });
+    await saveUserData({ dogs: newDogs, activeDogId: dog.id, classProgress: newClassProgress });
   }
   async function deleteDog(id) {
     const rem = dogs.filter(d => d.id !== id);
@@ -725,6 +757,53 @@ export default function App() {
     setEditingRunIdx(null);
     window.scrollTo(0, 0);
   }
+  // ── Class Progress (In Training dogs) ─────────────────────────
+  const myClassProgress = activeDog ? (allClassProgress[activeDog.id] || blankClassProgress()) : blankClassProgress();
+  async function toggleClassAttended(levelIdx, classIdx) {
+    if (!activeDog) return;
+    const cp = allClassProgress[activeDog.id] || blankClassProgress();
+    const levels = cp.levels.map((lvl,li) => li!==levelIdx ? lvl : {
+      ...lvl, classes: lvl.classes.map((c,ci) => ci!==classIdx ? c : { ...c, attended: !c.attended })
+    });
+    const newCp = { ...cp, levels };
+    const newAll = { ...allClassProgress, [activeDog.id]: newCp };
+    setAllClassProgress(newAll);
+    await saveUserData({ classProgress: newAll });
+  }
+  async function updateClassNotes(levelIdx, classIdx, notes) {
+    if (!activeDog) return;
+    const cp = allClassProgress[activeDog.id] || blankClassProgress();
+    const levels = cp.levels.map((lvl,li) => li!==levelIdx ? lvl : {
+      ...lvl, classes: lvl.classes.map((c,ci) => ci!==classIdx ? c : { ...c, notes })
+    });
+    const newCp = { ...cp, levels };
+    setAllClassProgress({ ...allClassProgress, [activeDog.id]: newCp });
+  }
+  async function saveClassNotes(levelIdx, classIdx) {
+    if (!activeDog) return;
+    await saveUserData({ classProgress: allClassProgress });
+  }
+  async function handleGradPhoto(file) {
+    if (!file || !user || !activeDog) return;
+    if (!navigator.onLine) {
+      alert("You're offline right now — photo uploads need a connection. Try again once you're back in range.");
+      return;
+    }
+    try {
+      const storageRef = ref(storage, `graduation/${user.uid}/${activeDog.id}`);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      const cp = allClassProgress[activeDog.id] || blankClassProgress();
+      const newCp = { ...cp, graduationPhotoUrl: url };
+      const newAll = { ...allClassProgress, [activeDog.id]: newCp };
+      setAllClassProgress(newAll);
+      await saveUserData({ classProgress: newAll });
+      setGradPhotoFile(null);
+    } catch (e) {
+      console.error("Graduation photo upload error:", e);
+      alert("Photo upload failed. Please try again.");
+    }
+  }
   async function handlePhoto(dogId, file) {
     if (!file || !user) return;
     if (!navigator.onLine) {
@@ -902,7 +981,19 @@ export default function App() {
             <input style={inputStyle} placeholder="e.g. Border Collie Mix" value={onboardDog.breed} onChange={e=>setOnboardDog({...onboardDog,breed:e.target.value})} />
             <label style={labelStyle}>Date of Birth</label>
             <input type="date" style={inputStyle} value={onboardDog.dob} onChange={e=>setOnboardDog({...onboardDog,dob:e.target.value})} />
-            <button onClick={()=>setOnboardStep(1)} disabled={!onboardDog.callName} style={{ ...btnStyle("#7c3aed"), width:"100%", padding:12, marginTop:16, background:"linear-gradient(135deg,#7c3aed,#06b6d4)" }}>Next → Org IDs</button>
+            <label style={labelStyle}>Where are they in their journey?</label>
+            <div style={{ display:"flex", gap:8, marginBottom:4 }}>
+              {[["trialing","🏆 Trialing"],["training","🎓 In Training"]].map(([val,label])=>(
+                <button key={val} type="button" onClick={()=>setOnboardDog({...onboardDog,status:val})} style={{
+                  flex:1, background: (onboardDog.status||"trialing")===val?"linear-gradient(135deg,#7c3aed,#06b6d4)":"#fff",
+                  color: (onboardDog.status||"trialing")===val?"#fff":"#7c3aed",
+                  border:`1px solid ${(onboardDog.status||"trialing")===val?"transparent":"#ddd6fe"}`,
+                  borderRadius:20, padding:"8px 12px", fontSize:12, cursor:"pointer", fontWeight: (onboardDog.status||"trialing")===val?"bold":"normal"
+                }}>{label}</button>
+              ))}
+            </div>
+            <div style={{ fontSize:11, color:"#aaa", marginBottom:8 }}>"In Training" swaps the Trials/Results/Titles tabs for a Class Progress tracker — switch anytime from My Dogs once trialing starts.</div>
+            <button onClick={()=>setOnboardStep(1)} disabled={!onboardDog.callName} style={{ ...btnStyle("#7c3aed"), width:"100%", padding:12, marginTop:8, background:"linear-gradient(135deg,#7c3aed,#06b6d4)" }}>Next → Org IDs</button>
           </div>
         )}
         {onboardStep === 1 && (
@@ -1221,52 +1312,74 @@ export default function App() {
                 <div style={{ fontSize:12, color:"#b45309", marginTop:2 }}>Looks like {activeDog?.callName} qualified for a title based on your Results — tap to review on the Titles tab.</div>
               </div>
             )}
-            {opensSoon.length>0&&(
-              <div style={{ background:"#eff6ff", border:"1px solid #93c5fd", borderRadius:10, padding:"12px 16px", marginBottom:12 }}>
-                <div style={{ fontWeight:"bold", color:"#1d4ed8", marginBottom:6 }}>🔔 Entries Opening Soon</div>
-                {opensSoon.map(t=>(
-                  <div key={t.id} style={{ fontSize:13, color:"#1e40af", display:"flex", justifyContent:"space-between", marginBottom:3 }}>
-                    <span>{t.name.split("–")[0].trim()} <OrgBadge org={t.org}/></span>
-                    <b>{daysUntil(t.entryOpens)}</b>
-                  </div>
-                ))}
-              </div>
-            )}
-            {deadlineSoon.length>0&&(
-              <div style={{ background:"#fef9c3", border:"1px solid #fde047", borderRadius:10, padding:"12px 16px", marginBottom:16 }}>
-                <div style={{ fontWeight:"bold", color:"#713f12", marginBottom:6 }}>⚠️ Entry Deadlines Soon</div>
-                {deadlineSoon.map(t=>(
-                  <div key={t.id} style={{ fontSize:13, color:"#854d0e", display:"flex", justifyContent:"space-between", marginBottom:3 }}>
-                    <span>{t.name.split("–")[0].trim()} <OrgBadge org={t.org}/></span>
-                    <b>{daysUntil(t.entryDeadline)}</b>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginBottom:18 }}>
-              <StatCard label="Entered" value={Object.values(dogRegs).filter(v=>v?.status==="entered").length} icon="📋"/>
-              <StatCard label="Titles" value={titlesEarned.length} icon="🏆"/>
-              <StatCard label="Upcoming" value={upcoming.length} icon="📅"/>
-            </div>
-            {upcoming[0]&&(
-              <div style={{ background:ORG_BG[upcoming[0].org]||"#fff", borderRadius:12, padding:16, marginBottom:16, borderLeft:`5px solid ${ORG_COLORS[upcoming[0].org]}`, boxShadow:"0 2px 10px rgba(0,0,0,0.06)" }}>
-                <div style={{ fontSize:10, color:"#999", textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>Next Trial</div>
-                <div style={{ fontWeight:"bold", fontSize:15 }}>{upcoming[0].name}</div>
-                <div style={{ fontSize:13, color:"#666", marginTop:5, display:"flex", gap:10, flexWrap:"wrap" }}>
-                  <span>📅 {upcoming[0].date}</span>
-                  <span>📍 {upcoming[0].location}</span>
-                  <span style={{ color: getStatus(upcoming[0].id)==="entered"?"#27ae60": getStatus(upcoming[0].id)==="waitlist"?"#f59e0b":"#e07b39", fontWeight:"bold" }}>
-                    {getStatus(upcoming[0].id)==="entered"?"✓ Entered": getStatus(upcoming[0].id)==="waitlist"?"⏳ Waitlist":"Not Entered"}
-                  </span>
+            {dogStatus==="training" ? (
+              <>
+                <div style={{ background:"#f0fdf4", borderRadius:12, padding:16, marginBottom:16, border:"1px solid #86efac" }}>
+                  <div style={{ fontSize:10, color:"#166534", textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>🎓 Foundations Program</div>
+                  <div style={{ fontWeight:"bold", fontSize:15, marginBottom:6 }}>{activeDog?.callName} is In Training</div>
+                  {(() => {
+                    const totalClasses = myClassProgress.levels.reduce((a,l)=>a+l.classes.length,0);
+                    const doneClasses = myClassProgress.levels.reduce((a,l)=>a+l.classes.filter(c=>c.attended).length,0);
+                    const currentLevel = myClassProgress.levels.find(l=>l.classes.some(c=>!c.attended)) || myClassProgress.levels[myClassProgress.levels.length-1];
+                    return (
+                      <div style={{ fontSize:13, color:"#666" }}>
+                        📍 Level {currentLevel?.level||6} of 6 · {doneClasses}/{totalClasses} classes complete
+                      </div>
+                    );
+                  })()}
+                  <button onClick={()=>setTab("Class Progress")} style={{ ...btnStyle("#27ae60"), marginTop:10, padding:"6px 14px", fontSize:12 }}>View Class Progress →</button>
                 </div>
-              </div>
+              </>
+            ) : (
+              <>
+                {opensSoon.length>0&&(
+                  <div style={{ background:"#eff6ff", border:"1px solid #93c5fd", borderRadius:10, padding:"12px 16px", marginBottom:12 }}>
+                    <div style={{ fontWeight:"bold", color:"#1d4ed8", marginBottom:6 }}>🔔 Entries Opening Soon</div>
+                    {opensSoon.map(t=>(
+                      <div key={t.id} style={{ fontSize:13, color:"#1e40af", display:"flex", justifyContent:"space-between", marginBottom:3 }}>
+                        <span>{t.name.split("–")[0].trim()} <OrgBadge org={t.org}/></span>
+                        <b>{daysUntil(t.entryOpens)}</b>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {deadlineSoon.length>0&&(
+                  <div style={{ background:"#fef9c3", border:"1px solid #fde047", borderRadius:10, padding:"12px 16px", marginBottom:16 }}>
+                    <div style={{ fontWeight:"bold", color:"#713f12", marginBottom:6 }}>⚠️ Entry Deadlines Soon</div>
+                    {deadlineSoon.map(t=>(
+                      <div key={t.id} style={{ fontSize:13, color:"#854d0e", display:"flex", justifyContent:"space-between", marginBottom:3 }}>
+                        <span>{t.name.split("–")[0].trim()} <OrgBadge org={t.org}/></span>
+                        <b>{daysUntil(t.entryDeadline)}</b>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginBottom:18 }}>
+                  <StatCard label="Entered" value={Object.values(dogRegs).filter(v=>v?.status==="entered").length} icon="📋"/>
+                  <StatCard label="Titles" value={titlesEarned.length} icon="🏆"/>
+                  <StatCard label="Upcoming" value={upcoming.length} icon="📅"/>
+                </div>
+                {upcoming[0]&&(
+                  <div style={{ background:ORG_BG[upcoming[0].org]||"#fff", borderRadius:12, padding:16, marginBottom:16, borderLeft:`5px solid ${ORG_COLORS[upcoming[0].org]}`, boxShadow:"0 2px 10px rgba(0,0,0,0.06)" }}>
+                    <div style={{ fontSize:10, color:"#999", textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>Next Trial</div>
+                    <div style={{ fontWeight:"bold", fontSize:15 }}>{upcoming[0].name}</div>
+                    <div style={{ fontSize:13, color:"#666", marginTop:5, display:"flex", gap:10, flexWrap:"wrap" }}>
+                      <span>📅 {upcoming[0].date}</span>
+                      <span>📍 {upcoming[0].location}</span>
+                      <span style={{ color: getStatus(upcoming[0].id)==="entered"?"#27ae60": getStatus(upcoming[0].id)==="waitlist"?"#f59e0b":"#e07b39", fontWeight:"bold" }}>
+                        {getStatus(upcoming[0].id)==="entered"?"✓ Entered": getStatus(upcoming[0].id)==="waitlist"?"⏳ Waitlist":"Not Entered"}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {trialsLoading&&<div style={{ textAlign:"center", color:"#bbb", fontSize:13, padding:16 }}>Syncing calendar…</div>}
+                <div style={{ fontWeight:"bold", fontSize:14, marginBottom:10, color:"#5b21b6" }}>Recent Results — {activeDog?.callName}</div>
+                {myEventResults.length===0
+                  ? <div style={{ color:"#bbb", fontSize:13 }}>No results yet — go sniff some stuff! 🐾</div>
+                  : myEventResults.slice(-3).reverse().map(r=><ResultRow key={r.id} r={r}/>)
+                }
+              </>
             )}
-            {trialsLoading&&<div style={{ textAlign:"center", color:"#bbb", fontSize:13, padding:16 }}>Syncing calendar…</div>}
-            <div style={{ fontWeight:"bold", fontSize:14, marginBottom:10, color:"#5b21b6" }}>Recent Results — {activeDog?.callName}</div>
-            {myEventResults.length===0
-              ? <div style={{ color:"#bbb", fontSize:13 }}>No results yet — go sniff some stuff! 🐾</div>
-              : myEventResults.slice(-3).reverse().map(r=><ResultRow key={r.id} r={r}/>)
-            }
           </div>
         )}
         {/* TRIALS */}
@@ -1812,6 +1925,81 @@ export default function App() {
             })}
           </div>
         )}
+        {/* CLASS PROGRESS */}
+        {tab==="Class Progress" && (
+          <div>
+            {(() => {
+              const totalClasses = myClassProgress.levels.reduce((a,l)=>a+l.classes.length,0);
+              const doneClasses = myClassProgress.levels.reduce((a,l)=>a+l.classes.filter(c=>c.attended).length,0);
+              const currentLevel = myClassProgress.levels.find(l=>l.classes.some(c=>!c.attended)) || myClassProgress.levels[myClassProgress.levels.length-1];
+              return (
+                <>
+                  <div style={{ fontWeight:"bold", fontSize:16, marginBottom:4, color:"#5b21b6" }}>🎓 {activeDog?.callName}'s Class Progress</div>
+                  <div style={{ fontSize:13, color:"#888", marginBottom:16 }}>Track attendance and notes through the 6-level foundations program. Switch to "Trialing" from My Dogs once you start competing.</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:18 }}>
+                    <StatCard label="Current Level" value={currentLevel?.level||6} icon="🎓"/>
+                    <StatCard label="Classes Done" value={`${doneClasses}/${totalClasses}`} icon="✅"/>
+                  </div>
+                  {myClassProgress.levels.map((lvl, levelIdx) => {
+                    const isExpanded = expandedLevels.has(lvl.level);
+                    const toggleExpand = () => setExpandedLevels(prev => { const n = new Set(prev); isExpanded ? n.delete(lvl.level) : n.add(lvl.level); return n; });
+                    const doneCount = lvl.classes.filter(c=>c.attended).length;
+                    const levelComplete = doneCount === lvl.classes.length;
+                    return (
+                      <div key={lvl.level} style={{ background: levelComplete?"#f0fdf4":"#fff", borderRadius:12, marginBottom:10, border:`1px solid ${levelComplete?"#86efac":"#e9d5ff"}`, overflow:"hidden" }}>
+                        <div onClick={toggleExpand} style={{ padding:"12px 14px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                            <span style={{ fontWeight:"bold", fontSize:14 }}>Level {lvl.level}</span>
+                            {levelComplete && <span style={{ fontSize:10, background:"#e8f8ee", color:"#27ae60", borderRadius:20, padding:"1px 8px", fontWeight:"bold" }}>✓ Complete</span>}
+                            <span style={{ fontSize:11, color:"#888" }}>{doneCount}/{lvl.classes.length} classes</span>
+                          </div>
+                          <span style={{ fontSize:14, color:"#bbb" }}>{isExpanded ? "▲" : "▼"}</span>
+                        </div>
+                        {isExpanded && (
+                          <div style={{ padding:"0 14px 14px" }}>
+                            {lvl.classes.map((c, classIdx) => (
+                              <div key={c.classNum} style={{ background:"#faf5ff", borderRadius:8, padding:"10px 12px", marginBottom:8, border:"1px solid #e9d5ff" }}>
+                                <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", marginBottom:6 }}>
+                                  <input type="checkbox" checked={c.attended} onChange={()=>toggleClassAttended(levelIdx, classIdx)} style={{ width:16, height:16 }}/>
+                                  <span style={{ fontSize:13, fontWeight:"bold", color: c.attended?"#27ae60":"#5b21b6" }}>Class {c.classNum}{c.attended?" · Attended ✓":""}</span>
+                                </label>
+                                <input
+                                  style={{ ...inputStyle, fontSize:12, marginBottom:0 }}
+                                  placeholder="Notes from this class…"
+                                  value={c.notes}
+                                  onChange={e=>updateClassNotes(levelIdx, classIdx, e.target.value)}
+                                  onBlur={()=>saveClassNotes(levelIdx, classIdx)}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {/* Graduation photo */}
+                  <div style={{ background:"#fffbeb", borderRadius:12, padding:16, marginTop:16, border:"1px solid #fde68a" }}>
+                    <div style={{ fontWeight:"bold", fontSize:14, color:"#92400e", marginBottom:8 }}>🎓 Graduation Photo</div>
+                    {myClassProgress.graduationPhotoUrl ? (
+                      <div>
+                        <img src={myClassProgress.graduationPhotoUrl} alt="graduation" style={{ width:"100%", maxHeight:300, objectFit:"cover", borderRadius:8, marginBottom:8 }}/>
+                        <label style={{ fontSize:12, color:"#b45309", cursor:"pointer", textDecoration:"underline" }}>
+                          Replace photo
+                          <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>handleGradPhoto(e.target.files[0])}/>
+                        </label>
+                      </div>
+                    ) : (
+                      <label style={{ cursor:"pointer", display:"flex", alignItems:"center", gap:8, fontSize:13, color:"#b45309" }}>
+                        <span style={{ fontSize:20 }}>📸</span> Tap to add a graduation photo once the program is complete
+                        <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>handleGradPhoto(e.target.files[0])}/>
+                      </label>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        )}
         {/* RULES & REGS */}
         {tab==="Rules & Regs" && (
           <div>
@@ -1885,6 +2073,18 @@ export default function App() {
                 <input style={inputStyle} value={dogForm.breed||""} onChange={e=>setDogForm({...dogForm,breed:e.target.value})}/>
                 <label style={labelStyle}>Date of Birth</label>
                 <input type="date" style={inputStyle} value={dogForm.dob||""} onChange={e=>setDogForm({...dogForm,dob:e.target.value})}/>
+                <label style={labelStyle}>Where are they in their journey?</label>
+                <div style={{ display:"flex", gap:8 }}>
+                  {[["trialing","🏆 Trialing"],["training","🎓 In Training"]].map(([val,label])=>(
+                    <button key={val} type="button" onClick={()=>setDogForm({...dogForm,status:val})} style={{
+                      flex:1, background: (dogForm.status||"trialing")===val?"linear-gradient(135deg,#7c3aed,#06b6d4)":"#fff",
+                      color: (dogForm.status||"trialing")===val?"#fff":"#7c3aed",
+                      border:`1px solid ${(dogForm.status||"trialing")===val?"transparent":"#ddd6fe"}`,
+                      borderRadius:20, padding:"8px 12px", fontSize:12, cursor:"pointer", fontWeight: (dogForm.status||"trialing")===val?"bold":"normal"
+                    }}>{label}</button>
+                  ))}
+                </div>
+                <div style={{ fontSize:11, color:"#aaa", margin:"4px 0 8px" }}>"In Training" swaps the Trials/Results/Titles tabs for a Class Progress tracker.</div>
                 <div style={{ background:"#faf5ff", borderRadius:10, padding:"12px 14px", marginTop:14, border:"1px solid #e9d5ff" }}>
                   <div style={{ fontWeight:"bold", fontSize:13, color:"#5b21b6", marginBottom:10 }}>Organization IDs</div>
                   {ORG_IDS.map(({org,key,label,placeholder})=>(
@@ -1914,7 +2114,12 @@ export default function App() {
                   </div>
                   <button onClick={()=>{setEditingDogId(activeDog.id);setDogForm({...activeDog});}} style={btnStyle("#7c3aed",true)}>Edit</button>
                 </div>
-                <div style={{ fontSize:20, fontWeight:"bold", color:"#1e1b4b" }}>{activeDog.name||activeDog.callName}</div>
+                <div style={{ fontSize:20, fontWeight:"bold", color:"#1e1b4b", display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                  {activeDog.name||activeDog.callName}
+                  <span style={{ fontSize:11, fontWeight:"bold", background: dogStatus==="training"?"#fef3c7":"#e8f8ee", color: dogStatus==="training"?"#b45309":"#27ae60", borderRadius:20, padding:"2px 10px" }}>
+                    {dogStatus==="training" ? "🎓 In Training" : "🏆 Trialing"}
+                  </span>
+                </div>
                 {activeDog.name&&activeDog.callName&&<div style={{ color:"#888", fontSize:14, marginTop:2 }}>"{activeDog.callName}"</div>}
                 {activeDog.breed&&<div style={{ color:"#777", fontSize:13, marginTop:2 }}>{activeDog.breed}</div>}
                 {activeDog.dob&&<div style={{ fontSize:13, color:"#666", marginTop:4 }}>🎂 DOB: {activeDog.dob}</div>}
