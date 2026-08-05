@@ -30,8 +30,18 @@ const TABS = ["Dashboard", "Trials", "Results", "Titles", "Training", "My Dogs",
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.8";
+const APP_VERSION = "1.9";
 const WHATS_NEW = [
+  {
+    version: "1.9",
+    date: "August 2026",
+    title: "Offline Mode",
+    items: [
+      "📡 The app now works with no signal — log training sessions, results, and notes anywhere, and they'll sync automatically the next time you're back in range.",
+      "🔔 A small banner lets you know when you're offline so it's clear what's happening.",
+      "📸 Photo and certificate uploads still need a live connection — if you try to attach one with no signal, the app will remind you to add it later instead of failing silently.",
+    ],
+  },
   {
     version: "1.8",
     date: "August 2026",
@@ -143,6 +153,8 @@ export default function App() {
   const [rulesEditUpdated, setRulesEditUpdated] = useState("");
   // ── Title auto-detection ──────────────────────────────────────
   const [dismissedTitleSuggestions, setDismissedTitleSuggestions] = useState({}); // { [dogId]: [key,...] }
+  // ── Offline status ───────────────────────────────────────────
+  const [isOnline, setIsOnline] = useState(typeof navigator === "undefined" || navigator.onLine);
   // ── Admin ────────────────────────────────────────────────────
   const [showAdmin, setShowAdmin]         = useState(false);  const [adminPin, setAdminPin]           = useState("");
   const [adminUnlocked, setAdminUnlocked] = useState(false);
@@ -215,6 +227,14 @@ export default function App() {
   // ── What's New — auto-show on new version ────────────────────
   useEffect(() => {
     if (whatsNewSeen !== APP_VERSION) setShowWhatsNew(true);
+  }, []);
+  // ── Offline status — track connectivity so we can warn before photo uploads
+  useEffect(() => {
+    const goOnline = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => { window.removeEventListener("online", goOnline); window.removeEventListener("offline", goOffline); };
   }, []);
   // ── Firebase trial calendar ──────────────────────────────────
   useEffect(() => {
@@ -528,19 +548,33 @@ export default function App() {
     if (!activeDog) return;
     let photoUrl = editingResultId ? (allResults[activeDog.id]?.find(r=>r.id===editingResultId)?.photoUrl||"") : "";
     if (resultPhotoFile) {
-      try {
-        const storageRef = ref(storage, `ribbons/${user.uid}/${Date.now()}`);
-        await uploadBytes(storageRef, resultPhotoFile);
-        photoUrl = await getDownloadURL(storageRef);
-      } catch (err) { console.error("Ribbon photo error:", err); }
+      if (!navigator.onLine) {
+        alert("You're offline — the ribbon photo won't upload right now, but the rest of this result will still save. Add the photo later once you're back in range.");
+      } else {
+        try {
+          const storageRef = ref(storage, `ribbons/${user.uid}/${Date.now()}`);
+          await uploadBytes(storageRef, resultPhotoFile);
+          photoUrl = await getDownloadURL(storageRef);
+        } catch (err) {
+          console.error("Ribbon photo error:", err);
+          alert("Ribbon photo upload failed — the rest of the result was still saved. Try adding the photo again later.");
+        }
+      }
     }
     let certificateUrl = editingResultId ? (allResults[activeDog.id]?.find(r=>r.id===editingResultId)?.certificateUrl||"") : "";
     if (certificatePhotoFile) {
-      try {
-        const storageRef = ref(storage, `certificates/${user.uid}/${Date.now()}`);
-        await uploadBytes(storageRef, certificatePhotoFile);
-        certificateUrl = await getDownloadURL(storageRef);
-      } catch (err) { console.error("Certificate photo error:", err); }
+      if (!navigator.onLine) {
+        alert("You're offline — the certificate photo won't upload right now, but the rest of this result will still save. Add the photo later once you're back in range.");
+      } else {
+        try {
+          const storageRef = ref(storage, `certificates/${user.uid}/${Date.now()}`);
+          await uploadBytes(storageRef, certificatePhotoFile);
+          certificateUrl = await getDownloadURL(storageRef);
+        } catch (err) {
+          console.error("Certificate photo error:", err);
+          alert("Certificate photo upload failed — the rest of the result was still saved. Try adding the photo again later.");
+        }
+      }
     }
     if (editingResultId) {
       const newResults = { ...allResults, [activeDog.id]: (allResults[activeDog.id]||[]).map(r => r.id===editingResultId ? {...resultForm, id:editingResultId, photoUrl, certificateUrl} : r) };
@@ -589,13 +623,17 @@ export default function App() {
       certificateUrl = allResults[activeDog.id]?.find(r=>r.id===editingTitleId)?.certificateUrl || "";
     }
     if (titleCertFile) {
-      try {
-        const storageRef = ref(storage, `certificates/${user.uid}/${Date.now()}`);
-        await uploadBytes(storageRef, titleCertFile);
-        certificateUrl = await getDownloadURL(storageRef);
-      } catch (err) {
-        console.error("Certificate upload error:", err);
-        alert("Certificate photo upload failed — title info will still be saved without the image. Try re-editing to upload the photo again.");
+      if (!navigator.onLine) {
+        alert("You're offline — the certificate photo won't upload right now, but the title info will still save. Add the photo later once you're back in range.");
+      } else {
+        try {
+          const storageRef = ref(storage, `certificates/${user.uid}/${Date.now()}`);
+          await uploadBytes(storageRef, titleCertFile);
+          certificateUrl = await getDownloadURL(storageRef);
+        } catch (err) {
+          console.error("Certificate upload error:", err);
+          alert("Certificate photo upload failed — title info will still be saved without the image. Try re-editing to upload the photo again.");
+        }
       }
     }
     if (editingTitleId) {
@@ -689,6 +727,10 @@ export default function App() {
   }
   async function handlePhoto(dogId, file) {
     if (!file || !user) return;
+    if (!navigator.onLine) {
+      alert("You're offline right now — photo uploads need a connection. Try again once you're back in range.");
+      return;
+    }
     try {
       const storageRef = ref(storage, `photos/${user.uid}/${dogId}`);
       await uploadBytes(storageRef, file);
@@ -1165,6 +1207,11 @@ export default function App() {
         </div>
       </div>
       <div style={{ padding:"16px 14px", maxWidth:700, margin:"0 auto" }}>
+        {!isOnline && (
+          <div style={{ background:"#fef3c7", border:"1px solid #fde68a", borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:12, color:"#92400e", display:"flex", alignItems:"center", gap:8 }}>
+            📡 You're offline — your changes are saved on this device and will sync automatically once you're back in range.
+          </div>
+        )}
         {/* DASHBOARD */}
         {tab==="Dashboard" && (
           <div>
