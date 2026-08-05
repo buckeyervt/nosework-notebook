@@ -10,7 +10,11 @@
     "react-scripts": "5.0.1"
   },
   "overrides": {
-    "schema-utils": "^4.3.0"
+    "schema-utils": {
+      ".": "^4.3.0",
+      "ajv": "^8.12.0",
+      "ajv-keywords": "^5.1.0"
+    }
   },
   "scripts": {
     "start": "react-scripts start",
