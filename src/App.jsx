@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { db } from "./firebase";
 import { MASTER_TRIALS } from "./trials";
 import { CHEAT_SHEETS } from "./rulesCheatSheets";
@@ -31,8 +31,17 @@ const TRAINING_TABS = ["Dashboard", "Class Progress", "Training", "My Dogs", "Ru
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.10";
+const APP_VERSION = "1.11";
 const WHATS_NEW = [
+  {
+    version: "1.11",
+    date: "August 2026",
+    title: "Offline Save Fix",
+    items: [
+      "🐛 Fixed a bug where saving while offline left the form open with no confirmation, which made repeated taps queue up duplicate entries once you got signal back.",
+      "✅ Every save now shows a quick confirmation toast — \"Saved\" when you're online, or \"Saved offline — will sync\" when you're not — and the form closes right away either way.",
+    ],
+  },
   {
     version: "1.10",
     date: "August 2026",
@@ -175,6 +184,9 @@ export default function App() {
   const [dismissedTitleSuggestions, setDismissedTitleSuggestions] = useState({}); // { [dogId]: [key,...] }
   // ── Offline status ───────────────────────────────────────────
   const [isOnline, setIsOnline] = useState(typeof navigator === "undefined" || navigator.onLine);
+  // ── Save toast (confirms every save fired, even while offline) ─
+  const [savedToast, setSavedToast] = useState(null);
+  const savedToastTimer = useRef(null);
   // ── Admin ────────────────────────────────────────────────────
   const [showAdmin, setShowAdmin]         = useState(false);  const [adminPin, setAdminPin]           = useState("");
   const [adminUnlocked, setAdminUnlocked] = useState(false);
@@ -317,11 +329,23 @@ export default function App() {
     return () => unsub();
   }, [user]);
   // ── Save user data to Firebase ───────────────────────────────
+  // IMPORTANT: we deliberately do NOT await the setDoc() call itself.
+  // When offline, Firestore queues the write in its local cache right away
+  // (so your data is safe and will sync once you're back in range), but the
+  // Promise it returns doesn't resolve until the write reaches the server —
+  // which could be never, if you're offline. Awaiting it here would leave
+  // the caller (and the form on screen) hanging with no feedback, which is
+  // exactly what looked "broken." Instead we fire the write, show a toast
+  // immediately, and let the caller move on right away.
   async function saveUserData(updates) {
     if (!user) return;
-    try {
-      await setDoc(doc(db, "users", user.uid), updates, { merge: true });
-    } catch (e) { console.error("Save error:", e); }
+    setDoc(doc(db, "users", user.uid), updates, { merge: true }).catch(e => console.error("Save error:", e));
+    showSavedToast();
+  }
+  function showSavedToast() {
+    setSavedToast(isOnline ? "✅ Saved" : "📡 Saved offline — will sync once you're back in range");
+    clearTimeout(savedToastTimer.current);
+    savedToastTimer.current = setTimeout(() => setSavedToast(null), isOnline ? 1800 : 3200);
   }
   // ── Auth functions ───────────────────────────────────────────
   async function handleSignup(e) {
@@ -1267,6 +1291,11 @@ export default function App() {
   // ════════════════════════════════════════════════════════════
   return (
     <div style={{ fontFamily:"Georgia,serif", background:"#f5f3ff", minHeight:"100vh", color:"#1e1b4b" }}>
+      {savedToast && (
+        <div style={{ position:"fixed", bottom:20, left:"50%", transform:"translateX(-50%)", background: savedToast.startsWith("✅") ? "#1e1b4b" : "#92400e", color:"#fff", borderRadius:20, padding:"10px 18px", fontSize:13, fontWeight:"bold", boxShadow:"0 4px 20px rgba(0,0,0,0.25)", zIndex:9999, maxWidth:"90vw", textAlign:"center" }}>
+          {savedToast}
+        </div>
+      )}
       <div style={{ background:"linear-gradient(135deg,#6b21a8,#7c3aed,#06b6d4)", padding:"14px 18px 0", boxShadow:"0 4px 20px rgba(0,0,0,0.2)" }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
