@@ -215,6 +215,38 @@ export function getTitleDefs(org) {
   return [];
 }
 
+// Live progress toward the basic element title while logging a run — e.g.
+// "2 of 3 qualifying passes logged, 1 to go." Used by the Results run form
+// so competitors can see how close they are without waiting for the
+// suggestion banner. Returns null if this org/element/level has no basic
+// element title (e.g. NACSW outside NW3, or a non-standard level).
+// If the basic title is already earned, also reports progress toward the
+// next AKC Elite tier (10 Qs), since that's the only org with a repeating
+// tier built on the same qualifying-legs criteria.
+export function elementProgress(org, element, level, results) {
+  const defs = getTitleDefs(org);
+  const def = defs.find(d => d.method === "qualifyingLegs" && d.element === element && sameLevel(d.level, level));
+  if (!def) return null;
+  const flat = flattenRuns(results, org);
+  const legs = matchingLegs(flat, def);
+  const legsHeld = legs.length;
+  const basicComplete = legsHeld >= def.legsNeeded;
+  const result = {
+    label: def.label,
+    legsHeld,
+    legsNeeded: def.legsNeeded,
+    remaining: Math.max(0, def.legsNeeded - legsHeld),
+    basicComplete,
+  };
+  if (org === "AKC" && basicComplete) {
+    const sinceBasic = legsHeld % 10;
+    result.eliteLegsHeld = legsHeld;
+    result.eliteRemaining = sinceBasic === 0 ? 0 : 10 - sinceBasic;
+    result.eliteTiersEarned = Math.floor(legsHeld / 10);
+  }
+  return result;
+}
+
 // Returns titles satisfied given a dog's results for one org, as:
 // { key, label, org, date, trialName, trialId, nextLevel }
 export function detectEarnedTitles(org, results) {
