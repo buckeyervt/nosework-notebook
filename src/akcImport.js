@@ -72,15 +72,31 @@ function parseCsvLine(line) {
   return result.map(s => s.trim());
 }
 
-// "07-Aug-2026" or "03-Jun-2026, 9:00:00 AM" -> "2026-08-07" / "2026-06-03"
+// Handles AKC's normal "07-Aug-2026" / "03-Jun-2026, 9:00:00 AM" format, plus
+// variants that show up after the file's been opened and re-saved in Excel
+// (which loves to "helpfully" reformat anything that looks like a date):
+// 2-digit years ("7-Aug-26"), US slash dates ("8/7/2026" or "08/07/26"), and
+// already-ISO dates ("2026-08-07").
 function parseAkcDate(raw) {
   const datePart = (raw || "").split(",")[0].trim();
-  const m = datePart.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
-  if (!m) return "";
-  const [, dd, mon, yyyy] = m;
-  const mm = MONTHS[mon];
-  if (!mm) return "";
-  return `${yyyy}-${mm}-${dd.padStart(2, "0")}`;
+  if (!datePart) return "";
+
+  let m = datePart.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2}|\d{4})$/);
+  if (m) {
+    const [, dd, mon, yy] = m;
+    const mm = MONTHS[mon];
+    if (mm) return `${yy.length === 2 ? `20${yy}` : yy}-${mm}-${dd.padStart(2, "0")}`;
+  }
+
+  m = datePart.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
+  if (m) {
+    const [, mo, dd, yy] = m;
+    return `${yy.length === 2 ? `20${yy}` : yy}-${mo.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return datePart;
+
+  return "";
 }
 
 // Scans the file for a row that contains both a "Name" and a "Start Date"
