@@ -31,8 +31,16 @@ const TRAINING_TABS = ["Dashboard", "Class Progress", "Training", "My Dogs", "Ru
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.14";
+const APP_VERSION = "1.15";
 const WHATS_NEW = [
+  {
+    version: "1.15",
+    date: "August 2026",
+    title: "Section A/B in Results",
+    items: [
+      "🆎 Added a Section selector (A/B) next to Level in Results runs — for orgs that split entry eligibility that way. It's optional and just for your own records; it doesn't change title detection.",
+    ],
+  },
   {
     version: "1.14",
     date: "August 2026",
@@ -1702,7 +1710,20 @@ export default function App() {
                 {showRunResultForm && (() => {
                   const orgElements = ORG_ELEMENTS[resultForm.org] || ["Interior","Exterior","Vehicle","Container","Buried","Water"];
                   const orgLevels = ORG_LEVELS[resultForm.org] || [];
-                  const isStandardLevel = orgLevels.includes(runResultForm.level);
+                  // Some orgs split a level into Section A / Section B (different entry
+                  // eligibility, same searches/criteria) — e.g. AKC & USCSS Novice A/B.
+                  // We store this as one string ("Novice A") since that's what shows up
+                  // on real scoresheets, but split it apart here so Level and Section
+                  // can be picked independently and still combine into that same string.
+                  const splitLevelSection = (raw) => {
+                    const s = (raw||"").trim();
+                    const m = s.match(/^(.+)\s+([AB])$/i);
+                    return m ? { base: m[1], section: m[2].toUpperCase() } : { base: s, section: "" };
+                  };
+                  const { base: parsedLevelBase, section: parsedSection } = splitLevelSection(runResultForm.level);
+                  const isStandardLevel = orgLevels.includes(parsedLevelBase);
+                  const setLevelBase = (newBase) => setRunResultForm({...runResultForm, level: newBase + (parsedSection && newBase ? ` ${parsedSection}` : "")});
+                  const setSection = (newSection) => setRunResultForm({...runResultForm, level: parsedLevelBase + (newSection ? ` ${newSection}` : "")});
                   return (
                   <div style={{ background:"#f0fdff", border:"1px solid #a5f3fc", borderRadius:10, padding:12, marginBottom:10 }}>
                     <div style={{ fontWeight:"bold", fontSize:12, color:"#0e7490", marginBottom:8 }}>{editingRunResultIdx!==null ? "Edit Run" : `Run ${(resultForm.runs?.length||0)+1}`}</div>
@@ -1718,16 +1739,16 @@ export default function App() {
                         }}>{el}</button>
                       ))}
                     </div>
-                    {/* Level + Result */}
-                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                    {/* Level + Section + Result */}
+                    <div style={{ display:"grid", gridTemplateColumns: isStandardLevel ? "1fr 0.6fr 1fr" : "1fr 1fr", gap:10 }}>
                       <div>
                         <label style={labelStyle}>Level / Class</label>
                         <select
                           style={inputStyle}
-                          value={isStandardLevel ? runResultForm.level : (runResultForm.level ? "__other__" : "")}
+                          value={isStandardLevel ? parsedLevelBase : (runResultForm.level ? "__other__" : "")}
                           onChange={e=>{
                             if (e.target.value === "__other__") setRunResultForm({...runResultForm, level: isStandardLevel ? "" : runResultForm.level});
-                            else setRunResultForm({...runResultForm, level: e.target.value});
+                            else setLevelBase(e.target.value);
                           }}
                         >
                           <option value="" disabled>Select level…</option>
@@ -1743,6 +1764,16 @@ export default function App() {
                           />
                         )}
                       </div>
+                      {isStandardLevel && (
+                        <div>
+                          <label style={labelStyle}>Section</label>
+                          <select style={inputStyle} value={parsedSection} onChange={e=>setSection(e.target.value)}>
+                            <option value="">—</option>
+                            <option value="A">A</option>
+                            <option value="B">B</option>
+                          </select>
+                        </div>
+                      )}
                       <div>
                         <label style={labelStyle}>Result</label>
                         <select style={inputStyle} value={runResultForm.result} onChange={e=>setRunResultForm({...runResultForm,result:e.target.value})}>
@@ -1750,6 +1781,9 @@ export default function App() {
                         </select>
                       </div>
                     </div>
+                    {isStandardLevel && (
+                      <div style={{ fontSize:10, color:"#888", marginTop:-6, marginBottom:6 }}>Section is optional — just for your own records, it doesn't affect qualifying.</div>
+                    )}
                     {/* Placement + Time */}
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
                       <div>
