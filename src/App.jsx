@@ -31,8 +31,17 @@ const TRAINING_TABS = ["Dashboard", "Class Progress", "Training", "My Dogs", "Ru
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.12";
+const APP_VERSION = "1.13";
 const WHATS_NEW = [
+  {
+    version: "1.13",
+    date: "August 2026",
+    title: "Move-Up Notices & AKC Elite Titles",
+    items: [
+      "🆙 Titles now flag when you've earned what you need to move up — per element for AKC/UKC, per full level for USCSS/NACSW — right on the title card.",
+      "🏆 AKC Elite element titles (10 qualifying scores) and Elite level titles are now auto-detected too, including the repeating numbered tiers (Elite2, Elite3…) for every additional 10 legs.",
+    ],
+  },
   {
     version: "1.12",
     date: "August 2026",
@@ -937,7 +946,7 @@ export default function App() {
   const upcoming     = trials.filter(t => t.date >= todayStr);
   const deadlineSoon = trials.filter(t => { if (!t.entryDeadline) return false; const d = Math.ceil((new Date(t.entryDeadline+"T12:00:00") - today)/86400000); return d>=0&&d<=14&&getStatus(t.id)==="none"; });
   const opensSoon    = trials.filter(t => { if (!t.entryOpens) return false; const d = Math.ceil((new Date(t.entryOpens+"T12:00:00") - today)/86400000); return d>=0&&d<=7&&getStatus(t.id)==="none"; });
-  const titlesEarned = myResults.filter(r=>r.title).map(r=>({id:r.id, org:r.org,title:r.title,date:r.date,trial:r.trial,certificateUrl:r.certificateUrl||"", autoKey:r.autoKey||null}));
+  const titlesEarned = myResults.filter(r=>r.title).map(r=>({id:r.id, org:r.org,title:r.title,date:r.date,trial:r.trial,certificateUrl:r.certificateUrl||"", autoKey:r.autoKey||null, nextLevel:r.nextLevel||null}));
   // ── Title auto-detection: suggestions not yet added or dismissed ─
   const dogDismissedKeys = activeDog ? (dismissedTitleSuggestions[activeDog.id] || []) : [];
   const dogAutoKeys = new Set(myResults.filter(r=>r.autoKey).map(r=>r.autoKey));
@@ -960,6 +969,7 @@ export default function App() {
       certificateUrl: "",
       isTitleOnly: true,
       autoKey: sugg.key,
+      nextLevel: sugg.nextLevel || null,
     };
     const newResults = { ...allResults, [activeDog.id]: [...(allResults[activeDog.id]||[]), newResult] };
     setAllResults(newResults);
@@ -1919,6 +1929,9 @@ export default function App() {
                       <div style={{ fontSize:11, color:"#b45309", marginTop:2 }}>
                         <OrgBadge org={s.org}/> {s.trialName?` · ${s.trialName}`:""}{s.date?` · ${s.date}`:""} — based on your logged Results
                       </div>
+                      {s.nextLevel && (
+                        <div style={{ fontSize:11, color:"#16a34a", fontWeight:"bold", marginTop:4 }}>🆙 Ready to move up to {s.nextLevel}!</div>
+                      )}
                     </div>
                     <div style={{ display:"flex", gap:6, flexShrink:0 }}>
                       <button onClick={()=>confirmTitleSuggestion(s)} style={{ ...btnStyle("#27ae60"), padding:"5px 12px", fontSize:11 }}>Add to Titles ✓</button>
@@ -2001,6 +2014,9 @@ export default function App() {
                                   {t.trial}{t.trial && t.date ? " · " : ""}{t.date}
                                   {t.trial==="Pre-app title" && !t.date ? <span style={{ color:"#bbb" }}> · manually entered</span> : ""}
                                 </div>
+                                {t.nextLevel && (
+                                  <div style={{ fontSize:11, color:"#16a34a", fontWeight:"bold", marginTop:2 }}>🆙 Ready to move up to {t.nextLevel}!</div>
+                                )}
                               </div>
                               <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
                                 <button onClick={e=>{e.stopPropagation(); const full=myResults.find(r=>r.id===t.id); setTitleForm({org:t.org,title:t.title,trial:t.trial||"",date:t.date||""}); setEditingTitleId(t.id); setTitleCertFile(null); setShowTitleForm(true); window.scrollTo(0,0);}} style={{ ...btnStyle("#7c3aed",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
