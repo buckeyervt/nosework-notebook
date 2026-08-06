@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { db } from "./firebase";
 import { MASTER_TRIALS } from "./trials";
 import { CHEAT_SHEETS } from "./rulesCheatSheets";
-import { detectEarnedTitles, getTitleDefs, elementProgress, ORG_ELEMENTS, ORG_LEVELS } from "./titleRules";
+import { detectEarnedTitles, getTitleDefs, elementProgress, ORG_ELEMENTS, ORG_LEVELS, ORG_OFFERINGS } from "./titleRules";
+import { parseAKCEventCsv } from "./akcImport";
 import {
   collection, doc, setDoc, deleteDoc, onSnapshot,
   writeBatch, getDoc, getDocs, addDoc, arrayUnion, arrayRemove, serverTimestamp
@@ -31,8 +32,45 @@ const TRAINING_TABS = ["Dashboard", "Class Progress", "Training", "My Dogs", "Ru
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.17";
+const APP_VERSION = "1.21";
 const WHATS_NEW = [
+  {
+    version: "1.21",
+    date: "August 2026",
+    title: "More Flexible CSV Import",
+    items: [
+      "📥 The AKC CSV importer now matches columns by name instead of position — feel free to delete columns you don't need (Eligible Breeds, Event Chair info, Time Zone, etc.) or reorder them before uploading.",
+      "🔑 Keep \"Event Number\" in the file if you can — it's what lets you re-upload the same export later without creating duplicate trials. Everything else is optional.",
+    ],
+  },
+  {
+    version: "1.20",
+    date: "August 2026",
+    title: "Multi-Select Classes/Levels on Trials",
+    items: [
+      "📋 The admin Add Trial form's \"Classes/Levels\" field is now a multi-select instead of free text — pick from each org's real levels, specialty divisions, and (for USCSS) all 8 Games classes, or type something not listed.",
+      "🎮 USCSS Games (Copy Cat, Double Dog Dare, Go the Distance, Heap O'Hides, LudicrouSpeed, Pairs Challenge, Scenting Sweepstakes, Team Spirit) are now selectable so trials offering games show that clearly.",
+      "✅ Existing trials with the old free-text level still display and edit fine — nothing needs to be re-entered.",
+    ],
+  },
+  {
+    version: "1.19",
+    date: "August 2026",
+    title: "Import AKC Trials from CSV",
+    items: [
+      "📥 New admin tool: Import CSV. Export a search from AKC's Event Search tool and upload it — the app pulls in the club, date, location, and entry window for every trial automatically instead of typing each one in by hand.",
+      "⚠️ Entry links, premium/flyer links, and class info aren't in AKC's export, so imported trials are flagged \"Needs Info\" — same filter already used for follow-ups.",
+      "🔁 Re-uploading the same export won't create duplicates — trials are matched by AKC's event number.",
+    ],
+  },
+  {
+    version: "1.18",
+    date: "August 2026",
+    title: "More Robust Section A/B Matching",
+    items: [
+      "🐛 Strengthened Section A/B matching so \"Novice A\", \"Novice-A\", \"Novice (A)\", and \"Novice Section A\" all combine into the same running total toward that element's title — confirmed against the rulebook: Section A and Section B legs count toward the exact same title, they're just different entry-eligibility pools, not separate requirements.",
+    ],
+  },
   {
     version: "1.17",
     date: "August 2026",
@@ -257,8 +295,14 @@ export default function App() {
   const [adminIdeaComment, setAdminIdeaComment] = useState({});  // { [id]: string }
   const [adminIdeaStatus, setAdminIdeaStatus]   = useState({});  // { [id]: string }
   const [adminTab, setAdminTab]           = useState("list");
-  const [trialForm, setTrialForm]         = useState({ org:"NACSW", name:"", date:"", location:"", level:"", entryOpens:"", entryDeadline:"", entryLink:"", premiumLink:"", notes:"", adminNotes:"", needsInfo:false });
+  const [trialForm, setTrialForm]         = useState({ org:"NACSW", name:"", date:"", location:"", level:[], entryOpens:"", entryDeadline:"", entryLink:"", premiumLink:"", notes:"", adminNotes:"", needsInfo:false });
+  const [customLevelInput, setCustomLevelInput] = useState("");
   const [adminFilter, setAdminFilter]     = useState("all"); // all | needsinfo
+  // ── AKC CSV import ────────────────────────────────────────────
+  const [csvFileName, setCsvFileName]     = useState("");
+  const [csvParseError, setCsvParseError] = useState("");
+  const [csvPreviewRows, setCsvPreviewRows] = useState(null); // null = no file loaded yet
+  const [csvImporting, setCsvImporting]   = useState(false);
   const [quickEditId, setQuickEditId]     = useState(null);
   const [quickEditLink, setQuickEditLink] = useState("");
   const [quickEditMode, setQuickEditMode] = useState("link"); // "link" | "location"
@@ -977,11 +1021,58 @@ export default function App() {
     await batch.commit();
     alert(`✅ ${MASTER_TRIALS.length} trials uploaded!`);
   }
+  // ── AKC CSV import ────────────────────────────────────────────
+  function handleCsvFile(file) {
+    if (!file) return;
+    setCsvFileName(file.name);
+    setCsvParseError("");
+    setCsvPreviewRows(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const { error, rows } = parseAKCEventCsv(e.target.result);
+      if (error) { setCsvParseError(error); return; }
+      if (rows.length === 0) { setCsvParseError("No Scent Work trials found in this file."); return; }
+      const existingIds = new Set(trials.map(t => t.id));
+      const withMeta = rows
+        .map(r => ({ ...r, alreadyExists: existingIds.has(r.id), selected: !existingIds.has(r.id) }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+      setCsvPreviewRows(withMeta);
+    };
+    reader.onerror = () => setCsvParseError("Couldn't read that file — try again.");
+    reader.readAsText(file);
+  }
+  function toggleCsvRow(id) {
+    setCsvPreviewRows(prev => prev.map(r => r.id === id ? { ...r, selected: !r.selected } : r));
+  }
+  function toggleCsvAll(selected) {
+    setCsvPreviewRows(prev => prev.map(r => ({ ...r, selected })));
+  }
+  async function confirmCsvImport() {
+    const toImport = csvPreviewRows.filter(r => r.selected);
+    if (toImport.length === 0) return;
+    setCsvImporting(true);
+    try {
+      const batch = writeBatch(db);
+      toImport.forEach(r => {
+        const { alreadyExists, selected, _eventNumber, ...trialData } = r;
+        batch.set(doc(db, "trials", trialData.id), trialData);
+      });
+      await batch.commit();
+      alert(`✅ ${toImport.length} trial${toImport.length>1?"s":""} imported! They're flagged "Needs Info" so you can go back and add entry links, premiums, and class/level info.`);
+      setCsvPreviewRows(null);
+      setCsvFileName("");
+    } catch (err) {
+      console.error("CSV import error:", err);
+      alert("Import failed — please try again.");
+    }
+    setCsvImporting(false);
+  }
   async function saveAdminTrial(e) {
     e.preventDefault();
     const id = editingTrialId || `t_${Date.now()}`;
     await setDoc(doc(db, "trials", id), { ...trialForm, id });
-    setTrialForm({ org:"NACSW", name:"", date:"", location:"", level:"", entryDeadline:"", entryLink:"", notes:"" });
+    setTrialForm({ org:"NACSW", name:"", date:"", location:"", level:[], entryOpens:"", entryDeadline:"", entryLink:"", premiumLink:"", notes:"", adminNotes:"", needsInfo:false });
+    setCustomLevelInput("");
     setEditingTrialId(null); setAdminTab("list");
     alert("✅ Saved! Everyone's app will update automatically.");
   }
@@ -1182,8 +1273,8 @@ export default function App() {
         ) : (
           <div>
             <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
-              {[["list","📋 All Trials"],["add","➕ Add Trial"],["seed","🚀 Seed DB"],["ideas","💡 Ideas"],["rules","📖 Rules"]].map(([t,l]) => (
-                <button key={t} onClick={()=>{setAdminTab(t);if(t!=="add"){setEditingTrialId(null);setTrialForm({org:"NACSW",name:"",date:"",location:"",level:"",entryOpens:"",entryDeadline:"",entryLink:"",premiumLink:"",notes:"",adminNotes:"",needsInfo:false});}}}
+              {[["list","📋 All Trials"],["add","➕ Add Trial"],["import","📥 Import CSV"],["seed","🚀 Seed DB"],["ideas","💡 Ideas"],["rules","📖 Rules"]].map(([t,l]) => (
+                <button key={t} onClick={()=>{setAdminTab(t);if(t!=="add"){setEditingTrialId(null);setTrialForm({org:"NACSW",name:"",date:"",location:"",level:[],entryOpens:"",entryDeadline:"",entryLink:"",premiumLink:"",notes:"",adminNotes:"",needsInfo:false});setCustomLevelInput("");}}}
                   style={{ ...btnStyle(adminTab===t?"#7c3aed":"#aaa"), padding:"6px 14px", fontSize:13, ...(adminTab===t?{background:"linear-gradient(135deg,#7c3aed,#06b6d4)"}:{}) }}>{l}</button>
               ))}
             </div>
@@ -1203,9 +1294,35 @@ export default function App() {
                   <div><label style={labelStyle}>Trial Date *</label><input required type="date" style={inputStyle} value={trialForm.date} onChange={e=>setTrialForm({...trialForm,date:e.target.value})} /></div>
                   <div><label style={labelStyle}>Entry Deadline</label><input type="date" style={inputStyle} value={trialForm.entryDeadline} onChange={e=>setTrialForm({...trialForm,entryDeadline:e.target.value})} /></div>
                 </div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-                  <div><label style={labelStyle}>Entry Opens</label><input type="date" style={inputStyle} value={trialForm.entryOpens||""} onChange={e=>setTrialForm({...trialForm,entryOpens:e.target.value})} /></div>
-                  <div><label style={labelStyle}>Level / Classes</label><input style={inputStyle} value={trialForm.level} onChange={e=>setTrialForm({...trialForm,level:e.target.value})} placeholder="e.g. NW1/NW2, Novice A" /></div>
+                <label style={labelStyle}>Entry Opens</label>
+                <input type="date" style={inputStyle} value={trialForm.entryOpens||""} onChange={e=>setTrialForm({...trialForm,entryOpens:e.target.value})} />
+                <label style={labelStyle}>Classes/Levels Offered</label>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:8 }}>
+                  {(trialForm.level||[]).length===0 && <span style={{ fontSize:12, color:"#bbb" }}>None selected yet</span>}
+                  {(trialForm.level||[]).map(lv => (
+                    <span key={lv} style={{ background:"#ede9fe", color:"#7c3aed", borderRadius:20, padding:"3px 6px 3px 12px", fontSize:12, fontWeight:"bold", display:"flex", alignItems:"center", gap:4 }}>
+                      {lv}
+                      <button type="button" onClick={()=>setTrialForm({...trialForm, level:(trialForm.level||[]).filter(x=>x!==lv)})} style={{ background:"none", border:"none", color:"#7c3aed", cursor:"pointer", fontSize:15, lineHeight:1, padding:"0 4px" }}>×</button>
+                    </span>
+                  ))}
+                </div>
+                <select
+                  style={inputStyle}
+                  value=""
+                  onChange={e=>{ const v=e.target.value; if (v && !(trialForm.level||[]).includes(v)) setTrialForm({...trialForm, level:[...(trialForm.level||[]), v]}); }}
+                >
+                  <option value="">+ Add a class/level offered…</option>
+                  {(ORG_OFFERINGS[trialForm.org]||[]).filter(o=>!(trialForm.level||[]).includes(o)).map(o=><option key={o} value={o}>{o}</option>)}
+                </select>
+                <div style={{ display:"flex", gap:6, marginTop:6, marginBottom:2 }}>
+                  <input
+                    style={{ ...inputStyle, marginBottom:0 }}
+                    value={customLevelInput}
+                    onChange={e=>setCustomLevelInput(e.target.value)}
+                    placeholder="Not listed? Type it here…"
+                    onKeyDown={e=>{ if (e.key==="Enter") { e.preventDefault(); const v=customLevelInput.trim(); if (v && !(trialForm.level||[]).includes(v)) setTrialForm({...trialForm, level:[...(trialForm.level||[]), v]}); setCustomLevelInput(""); } }}
+                  />
+                  <button type="button" onClick={()=>{ const v=customLevelInput.trim(); if (v && !(trialForm.level||[]).includes(v)) setTrialForm({...trialForm, level:[...(trialForm.level||[]), v]}); setCustomLevelInput(""); }} style={{ ...btnStyle("#aaa",true), flexShrink:0 }}>+ Add</button>
                 </div>
                 <label style={labelStyle}>Location</label>
                 <input style={inputStyle} value={trialForm.location} onChange={e=>setTrialForm({...trialForm,location:e.target.value})} placeholder="Venue, City, TX" />
@@ -1222,6 +1339,52 @@ export default function App() {
                   {editingTrialId&&<button type="button" onClick={()=>{setEditingTrialId(null);setAdminTab("list");}} style={btnStyle("#aaa")}>Cancel</button>}
                 </div>
               </form>
+            )}
+            {adminTab==="import"&&!editingTrialId&&(
+              <div style={formStyle}>
+                <div style={formTitle}>📥 Import AKC Trials from CSV</div>
+                <p style={{ fontSize:13, color:"#666", marginBottom:10 }}>
+                  Export a search from AKC's <a href="https://webapps.akc.org/event-search/" target="_blank" rel="noreferrer" style={{ color:"#7c3aed" }}>Event Search</a> tool (filter to Scent Work, your area) and upload the CSV here. It'll pull in the club, date, location, and entry window for each trial automatically — you'll still need to add the entry link, premium/flyer link, and class info by hand afterward, so imported trials are flagged ⚠️ Needs Info.
+                </p>
+                <label style={{ display:"inline-flex", alignItems:"center", gap:8, cursor:"pointer", background:"#f5f3ff", border:"1px solid #e9d5ff", borderRadius:8, padding:"10px 14px", fontSize:13, color:"#7c3aed", fontWeight:"bold" }}>
+                  📄 {csvFileName || "Choose CSV file…"}
+                  <input type="file" accept=".csv,text/csv" style={{ display:"none" }} onChange={e=>handleCsvFile(e.target.files[0])}/>
+                </label>
+                {csvParseError && (
+                  <div style={{ background:"#ffeaea", border:"1px solid #ffaaaa", borderRadius:8, padding:"10px 12px", marginTop:10, fontSize:13, color:"#c0392b" }}>⚠️ {csvParseError}</div>
+                )}
+                {csvPreviewRows && csvPreviewRows.length > 0 && (
+                  <div style={{ marginTop:14 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8, flexWrap:"wrap", gap:8 }}>
+                      <div style={{ fontSize:13, color:"#666" }}>
+                        Found {csvPreviewRows.length} trial{csvPreviewRows.length>1?"s":""} — {csvPreviewRows.filter(r=>r.alreadyExists).length} already in your calendar, {csvPreviewRows.filter(r=>!r.alreadyExists).length} new.
+                      </div>
+                      <div style={{ display:"flex", gap:6 }}>
+                        <button type="button" onClick={()=>toggleCsvAll(true)} style={{ fontSize:11, color:"#7c3aed", background:"#f5f3ff", border:"1px solid #e9d5ff", borderRadius:20, padding:"3px 10px", cursor:"pointer" }}>Select All</button>
+                        <button type="button" onClick={()=>toggleCsvAll(false)} style={{ fontSize:11, color:"#aaa", background:"#f5f5f5", border:"1px solid #ddd", borderRadius:20, padding:"3px 10px", cursor:"pointer" }}>Select None</button>
+                      </div>
+                    </div>
+                    <div style={{ maxHeight:360, overflowY:"auto", border:"1px solid #eee", borderRadius:8 }}>
+                      {csvPreviewRows.map(r=>(
+                        <label key={r.id} style={{ display:"flex", alignItems:"flex-start", gap:10, padding:"8px 12px", borderBottom:"1px solid #f3f0ff", cursor:"pointer", background: r.alreadyExists?"#fafafa":"#fff" }}>
+                          <input type="checkbox" checked={r.selected} onChange={()=>toggleCsvRow(r.id)} style={{ width:16, height:16, marginTop:2 }}/>
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <div style={{ fontSize:13, fontWeight:"bold", color:"#1e1b4b", display:"flex", gap:6, alignItems:"center", flexWrap:"wrap" }}>
+                              {r.name}
+                              {r.alreadyExists && <span style={{ fontSize:9, background:"#ede9fe", color:"#7c3aed", borderRadius:20, padding:"1px 7px", fontWeight:"bold" }}>already added</span>}
+                            </div>
+                            <div style={{ fontSize:11, color:"#888" }}>📅 {r.date} · 📍 {r.location}</div>
+                            <div style={{ fontSize:11, color:"#888" }}>Entry: {r.entryOpens||"?"} → {r.entryDeadline||"?"}</div>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                    <button onClick={confirmCsvImport} disabled={csvImporting || csvPreviewRows.filter(r=>r.selected).length===0} style={{ ...btnStyle("#27ae60"), marginTop:12, opacity: csvImporting?0.6:1 }}>
+                      {csvImporting ? "Importing…" : `Add ${csvPreviewRows.filter(r=>r.selected).length} Trial${csvPreviewRows.filter(r=>r.selected).length===1?"":"s"} to Firebase`}
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
             {adminTab==="seed"&&!editingTrialId&&(
               <div style={formStyle}>
@@ -1398,7 +1561,7 @@ export default function App() {
                         )}
                       </div>
                       <div style={{ display:"flex", gap:6, flexShrink:0 }}>
-                        <button onClick={()=>{setEditingTrialId(t.id);setTrialForm({...t,adminNotes:t.adminNotes||"",needsInfo:t.needsInfo||false,entryLink:t.entryLink||"",premiumLink:t.premiumLink||""});setAdminTab("add");window.scrollTo(0,0);}} style={{ ...btnStyle("#3a7bd5",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
+                        <button onClick={()=>{setEditingTrialId(t.id);setTrialForm({...t,level:Array.isArray(t.level)?t.level:(t.level?[t.level]:[]),adminNotes:t.adminNotes||"",needsInfo:t.needsInfo||false,entryLink:t.entryLink||"",premiumLink:t.premiumLink||""});setCustomLevelInput("");setAdminTab("add");window.scrollTo(0,0);}} style={{ ...btnStyle("#3a7bd5",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
                         <button onClick={()=>deleteTrial(t.id)} style={{ ...btnStyle("#c0392b",true), padding:"3px 10px", fontSize:11 }}>Del</button>
                       </div>
                     </div>
@@ -1566,7 +1729,10 @@ export default function App() {
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
                     <div style={{ flex:1, marginRight:8 }}>
                       <div style={{ fontWeight:"bold", fontSize:14, color: isPast?"#888":"#1e1b4b" }}>{t.name}</div>
-                      <div style={{ fontSize:11, color:"#888", marginTop:2 }}><OrgBadge org={t.org}/> · {t.level}</div>
+                      <div style={{ fontSize:11, color:"#888", marginTop:2 }}>
+                        <OrgBadge org={t.org}/>
+                        {(Array.isArray(t.level) ? t.level.join(", ") : t.level) ? ` · ${Array.isArray(t.level) ? t.level.join(", ") : t.level}` : ""}
+                      </div>
                       <div style={{ fontSize:12, color:"#555", marginTop:5 }}>
                         📅 <b>{t.date}</b> ·{" "}
                         <span onClick={()=>openMaps(t.location)} style={{ color:"#7c3aed", cursor:"pointer", textDecoration:"underline" }}>
