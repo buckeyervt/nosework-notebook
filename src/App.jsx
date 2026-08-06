@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { db } from "./firebase";
 import { MASTER_TRIALS } from "./trials";
 import { CHEAT_SHEETS } from "./rulesCheatSheets";
-import { detectEarnedTitles, ORG_ELEMENTS, ORG_LEVELS } from "./titleRules";
+import { detectEarnedTitles, getTitleDefs, elementProgress, ORG_ELEMENTS, ORG_LEVELS } from "./titleRules";
 import {
   collection, doc, setDoc, deleteDoc, onSnapshot,
   writeBatch, getDoc, getDocs, addDoc, arrayUnion, arrayRemove, serverTimestamp
@@ -31,8 +31,27 @@ const TRAINING_TABS = ["Dashboard", "Class Progress", "Training", "My Dogs", "Ru
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.15";
+const APP_VERSION = "1.17";
 const WHATS_NEW = [
+  {
+    version: "1.17",
+    date: "August 2026",
+    title: "Nested Titles & Live Progress",
+    items: [
+      "🏆 Once you earn a level/overall title (like AKC's SWN), its 4 element titles now nest inside it — tap to expand and see exactly when each one was finished.",
+      "🎯 While logging a run, you'll now see live progress toward that element's title — e.g. \"2/3 qualifying passes logged, 1 more to go!\" — right in the form as you enter results.",
+    ],
+  },
+  {
+    version: "1.16",
+    date: "August 2026",
+    title: "Sort Results Chronologically",
+    items: [
+      "📅 Results now sort by the actual event date, not just the order they were entered.",
+      "↕️ Added a Newest First / Oldest First toggle next to the org filter on the Results tab — tap it to flip the order.",
+      "🏠 The Dashboard's Recent Results now reflects true chronological order too.",
+    ],
+  },
   {
     version: "1.15",
     date: "August 2026",
@@ -247,8 +266,10 @@ export default function App() {
   const [editingTrialId, setEditingTrialId] = useState(null);
   // ── UI ───────────────────────────────────────────────────────
   const [filterOrg, setFilterOrg]           = useState("All");
+  const [resultsSortOrder, setResultsSortOrder] = useState("desc"); // "desc" = newest first, "asc" = oldest first
   const [expandedResults, setExpandedResults] = useState(new Set());
   const [expandedTitles, setExpandedTitles]   = useState(new Set());
+  const [expandedTitleGroups, setExpandedTitleGroups] = useState(new Set());
   const [expandedTraining, setExpandedTraining] = useState(new Set());
   const [showResultForm, setShowResultForm] = useState(false);
   const [resultForm, setResultForm]         = useState({ org:"NACSW", trial:"", date:"", title:"", notes:"", videoLink:"", trialType:"", runs:[] });
@@ -709,6 +730,13 @@ export default function App() {
   }
   const myResults = activeDog ? (allResults[activeDog.id] || []) : [];
   const myEventResults = myResults.filter(r => !r.isTitleOnly && r.notes !== "Title entered manually");
+  // Chronological by event date, newest-first ("desc") or oldest-first ("asc").
+  // Falls back to insertion order for any results missing a date.
+  const sortByDate = (arr, order) => arr.slice().sort((a,b) => {
+    const cmp = (a.date||"").localeCompare(b.date||"");
+    return order === "asc" ? cmp : -cmp;
+  });
+  const myEventResultsSorted = sortByDate(myEventResults, resultsSortOrder);
   // ── Manual title entry ───────────────────────────────────────
   async function addManualTitle(e) {
     e.preventDefault();
@@ -1502,7 +1530,7 @@ export default function App() {
                 <div style={{ fontWeight:"bold", fontSize:14, marginBottom:10, color:"#5b21b6" }}>Recent Results — {activeDog?.callName}</div>
                 {myEventResults.length===0
                   ? <div style={{ color:"#bbb", fontSize:13 }}>No results yet — go sniff some stuff! 🐾</div>
-                  : myEventResults.slice(-3).reverse().map(r=><ResultRow key={r.id} r={r}/>)
+                  : sortByDate(myEventResults, "desc").slice(0,3).map(r=><ResultRow key={r.id} r={r}/>)
                 }
               </>
             )}
@@ -1616,8 +1644,13 @@ export default function App() {
         {/* RESULTS */}
         {tab==="Results" && (
           <div>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
-              <OrgFilter value={filterOrg} onChange={setFilterOrg}/>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12, flexWrap:"wrap", gap:8 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                <OrgFilter value={filterOrg} onChange={setFilterOrg}/>
+                <button onClick={()=>setResultsSortOrder(o=>o==="desc"?"asc":"desc")} title="Sort by event date" style={{ fontSize:11, color:"#7c3aed", background:"#f5f3ff", border:"1px solid #e9d5ff", borderRadius:20, padding:"5px 12px", cursor:"pointer", fontWeight:"bold", display:"flex", alignItems:"center", gap:4 }}>
+                  {resultsSortOrder==="desc" ? "↓ Newest First" : "↑ Oldest First"}
+                </button>
+              </div>
               <button onClick={()=>{ setResultForm(blankResultForm()); setEditingResultId(null); setShowRunResultForm(false); setShowResultForm(!showResultForm); }} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)" }}>
                 {showResultForm && !editingResultId ? "Cancel" : "+ Add Result"}
               </button>
@@ -1784,6 +1817,22 @@ export default function App() {
                     {isStandardLevel && (
                       <div style={{ fontSize:10, color:"#888", marginTop:-6, marginBottom:6 }}>Section is optional — just for your own records, it doesn't affect qualifying.</div>
                     )}
+                    {/* Live progress toward the element title, based on runs already logged */}
+                    {isStandardLevel && runResultForm.element && (() => {
+                      const progress = elementProgress(resultForm.org, runResultForm.element, parsedLevelBase, myResults);
+                      if (!progress) return null;
+                      const wouldCount = runResultForm.result === "Pass" && !progress.basicComplete;
+                      return (
+                        <div style={{ background:"#f0f9ff", border:"1px solid #bae6fd", borderRadius:8, padding:"8px 10px", marginBottom:8, fontSize:11, color:"#0369a1" }}>
+                          {progress.basicComplete
+                            ? (progress.eliteRemaining != null
+                                ? `✅ Already earned ${progress.label}! 🌟 ${progress.eliteRemaining} more qualifying passes for the next Elite tier.`
+                                : `✅ Already earned ${progress.label}!`)
+                            : `🎯 ${progress.legsHeld}/${progress.legsNeeded} qualifying passes logged for ${progress.label} — ${progress.remaining} more to go!${wouldCount ? " (this run would count once saved)" : ""}`
+                          }
+                        </div>
+                      );
+                    })()}
                     {/* Placement + Time */}
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
                       <div>
@@ -1866,7 +1915,7 @@ export default function App() {
             {myEventResults.length > 0 && (
               <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:8 }}>
                 <button onClick={()=>{
-                  const filtered = filterOrg==="All" ? myEventResults : myEventResults.filter(r=>r.org===filterOrg);
+                  const filtered = filterOrg==="All" ? myEventResultsSorted : myEventResultsSorted.filter(r=>r.org===filterOrg);
                   const allExpanded = filtered.every(r=>expandedResults.has(r.id));
                   if (allExpanded) {
                     setExpandedResults(prev => { const n = new Set(prev); filtered.forEach(r=>n.delete(r.id)); return n; });
@@ -1875,13 +1924,13 @@ export default function App() {
                   }
                 }} style={{ fontSize:11, color:"#7c3aed", background:"#f5f3ff", border:"1px solid #e9d5ff", borderRadius:20, padding:"4px 12px", cursor:"pointer" }}>
                   {(() => {
-                    const filtered = filterOrg==="All" ? myEventResults : myEventResults.filter(r=>r.org===filterOrg);
+                    const filtered = filterOrg==="All" ? myEventResultsSorted : myEventResultsSorted.filter(r=>r.org===filterOrg);
                     return filtered.every(r=>expandedResults.has(r.id)) ? "⊖ Collapse All" : "⊕ Expand All";
                   })()}
                 </button>
               </div>
             )}
-            {(filterOrg==="All"?myEventResults:myEventResults.filter(r=>r.org===filterOrg)).slice().reverse().map(r=>{
+            {(filterOrg==="All"?myEventResultsSorted:myEventResultsSorted.filter(r=>r.org===filterOrg)).map(r=>{
               const isExpanded = expandedResults.has(r.id);
               const toggleExpand = () => setExpandedResults(prev => { const n = new Set(prev); isExpanded ? n.delete(r.id) : n.add(r.id); return n; });
               const nonGameRuns = (r.runs||[]).filter(run=>!run.isGame);
@@ -2060,12 +2109,82 @@ export default function App() {
             )}
             {ORGS.map(org=>{
               const orgTitles = titlesEarned.filter(t=>t.org===org);
+              // Group element titles underneath their level/overall title once
+              // that composite title is confirmed — e.g. once SWN (Novice Level
+              // Title) is earned, its 4 element titles nest inside it instead of
+              // sitting as separate flat rows. Children are computed LIVE from
+              // logged results (not from separately-confirmed title records), so
+              // the nested view always reflects your actual current progress.
+              const orgDefs = getTitleDefs(org);
+              const defsByKey = {};
+              orgDefs.forEach(d => { defsByKey[d.key] = d; });
+              const parentTitles = orgTitles.filter(t => t.autoKey && defsByKey[t.autoKey]?.method === "compositeAllElements");
+              const childKeysUsed = new Set();
+              parentTitles.forEach(p => { (defsByKey[p.autoKey]?.childKeys||[]).forEach(k=>childKeysUsed.add(k)); });
+              const ungroupedTitles = orgTitles.filter(t => !parentTitles.some(p=>p.id===t.id) && !(t.autoKey && childKeysUsed.has(t.autoKey)));
+              const liveByKey = {};
+              if (parentTitles.length > 0) detectEarnedTitles(org, myResults).forEach(e => { liveByKey[e.key] = e; });
               return (
                 <div key={org} style={{ background:ORG_BG[org], borderRadius:12, padding:16, marginBottom:12, borderLeft:`5px solid ${ORG_COLORS[org]}` }}>
                   <div style={{ fontWeight:"bold", fontSize:14, marginBottom:8 }}><OrgBadge org={org} size={13}/> {org}</div>
                   {orgTitles.length===0
                     ? <div style={{ color:"#ccc", fontSize:13 }}>No titles yet — you've got this! 🐕</div>
-                    : orgTitles.map((t,i)=>{
+                    : <>
+                    {parentTitles.map(p=>{
+                      const def = defsByKey[p.autoKey];
+                      const isRowExpanded = expandedTitles.has(p.id);
+                      const toggleRow = () => setExpandedTitles(prev => { const n = new Set(prev); isRowExpanded ? n.delete(p.id) : n.add(p.id); return n; });
+                      const isGroupExpanded = expandedTitleGroups.has(p.id);
+                      const toggleGroup = () => setExpandedTitleGroups(prev => { const n = new Set(prev); isGroupExpanded ? n.delete(p.id) : n.add(p.id); return n; });
+                      const elements = def?.elements || ORG_ELEMENTS[org] || [];
+                      const doneCount = elements.filter(el => liveByKey[`${org}|element|${el}|${def.level}`]).length;
+                      return (
+                        <div key={p.id} style={{ marginBottom:8, background:"rgba(255,255,255,0.7)", borderRadius:10, overflow:"hidden", border:"1px solid rgba(124,58,237,0.15)" }}>
+                          <div onClick={toggleRow} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", cursor:"pointer" }}>
+                            <span style={{ fontSize:20 }}>🏆</span>
+                            <div style={{ flex:1 }}>
+                              <div style={{ fontWeight:"bold", display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+                                {p.title}
+                                {p.autoKey && <span style={{ fontSize:9, background:"#e8f8ee", color:"#27ae60", borderRadius:20, padding:"1px 7px", fontWeight:"bold" }}>✓ Auto-detected</span>}
+                              </div>
+                              <div style={{ fontSize:11, color:"#888" }}>
+                                {p.trial}{p.trial && p.date ? " · " : ""}{p.date}
+                              </div>
+                              {p.nextLevel && (
+                                <div style={{ fontSize:11, color:"#16a34a", fontWeight:"bold", marginTop:2 }}>🆙 Ready to move up to {p.nextLevel}!</div>
+                              )}
+                            </div>
+                            <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
+                              <button onClick={e=>{e.stopPropagation(); const full=myResults.find(r=>r.id===p.id); setTitleForm({org:p.org,title:p.title,trial:p.trial||"",date:p.date||""}); setEditingTitleId(p.id); setTitleCertFile(null); setShowTitleForm(true); window.scrollTo(0,0);}} style={{ ...btnStyle("#7c3aed",true), padding:"3px 10px", fontSize:11 }}>Edit</button>
+                              <button onClick={e=>{e.stopPropagation(); deleteResult(p.id);}} style={{ ...btnStyle("#c0392b",true), padding:"3px 10px", fontSize:11 }}>Del</button>
+                              {p.certificateUrl && <span style={{ fontSize:12, color:"#bbb" }}>{isRowExpanded ? "▲" : "▼"}</span>}
+                            </div>
+                          </div>
+                          {isRowExpanded && p.certificateUrl && (
+                            <div style={{ padding:"0 12px 12px" }}>
+                              <img src={p.certificateUrl} alt="certificate" style={{ width:"100%", maxHeight:400, objectFit:"contain", borderRadius:8, border:"2px solid #fcd34d", background:"#fffbeb" }}/>
+                            </div>
+                          )}
+                          <div onClick={toggleGroup} style={{ padding:"6px 12px 8px", cursor:"pointer", display:"flex", alignItems:"center", gap:6, borderTop:"1px solid rgba(0,0,0,0.06)" }}>
+                            <span style={{ fontSize:11, color:"#7c3aed", fontWeight:"bold" }}>{isGroupExpanded ? "▲" : "▼"} {doneCount}/{elements.length} elements</span>
+                          </div>
+                          {isGroupExpanded && (
+                            <div style={{ padding:"0 12px 10px" }}>
+                              {elements.map(el => {
+                                const info = liveByKey[`${org}|element|${el}|${def.level}`];
+                                return (
+                                  <div key={el} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"5px 8px", background:"#faf5ff", borderRadius:6, marginBottom:4, fontSize:12 }}>
+                                    <span>{info ? "✅" : "⬜"} {el}</span>
+                                    <span style={{ color:"#888", fontSize:11 }}>{info?.date || "not yet"}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {ungroupedTitles.map((t,i)=>{
                         const isExpanded = expandedTitles.has(t.id);
                         const toggleExpand = () => setExpandedTitles(prev => { const n = new Set(prev); isExpanded ? n.delete(t.id) : n.add(t.id); return n; });
                         return (
@@ -2100,7 +2219,8 @@ export default function App() {
                             )}
                           </div>
                         );
-                      })
+                      })}
+                  </>
                   }
                 </div>
               );
