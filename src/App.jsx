@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { db } from "./firebase";
 import { MASTER_TRIALS } from "./trials";
 import { CHEAT_SHEETS } from "./rulesCheatSheets";
-import { detectEarnedTitles } from "./titleRules";
+import { detectEarnedTitles, ORG_ELEMENTS, ORG_LEVELS } from "./titleRules";
 import {
   collection, doc, setDoc, deleteDoc, onSnapshot,
   writeBatch, getDoc, getDocs, addDoc, arrayUnion, arrayRemove, serverTimestamp
@@ -31,8 +31,18 @@ const TRAINING_TABS = ["Dashboard", "Class Progress", "Training", "My Dogs", "Ru
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.13";
+const APP_VERSION = "1.14";
 const WHATS_NEW = [
+  {
+    version: "1.14",
+    date: "August 2026",
+    title: "Fixed Title Detection Mismatch",
+    items: [
+      "🐛 Found and fixed the real reason some finished elements weren't showing up as titles: the Level field was free text, so entries like \"Novice A\" or \"Novice B\" (real AKC section names) never matched the exact \"Novice\" the detection engine expected. Existing logged runs with a Section A/B suffix now match automatically — no need to re-enter anything.",
+      "📋 The Level field in Results is now a dropdown of each org's official levels (with an \"Other\" option for anything non-standard), so future entries always match exactly.",
+      "🎯 The Search Element buttons now only show the elements that actually exist for the org you picked, instead of one generic list for every org.",
+    ],
+  },
   {
     version: "1.13",
     date: "August 2026",
@@ -1689,13 +1699,17 @@ export default function App() {
                   </button>
                 </div>
                 {/* Run form */}
-                {showRunResultForm && (
+                {showRunResultForm && (() => {
+                  const orgElements = ORG_ELEMENTS[resultForm.org] || ["Interior","Exterior","Vehicle","Container","Buried","Water"];
+                  const orgLevels = ORG_LEVELS[resultForm.org] || [];
+                  const isStandardLevel = orgLevels.includes(runResultForm.level);
+                  return (
                   <div style={{ background:"#f0fdff", border:"1px solid #a5f3fc", borderRadius:10, padding:12, marginBottom:10 }}>
                     <div style={{ fontWeight:"bold", fontSize:12, color:"#0e7490", marginBottom:8 }}>{editingRunResultIdx!==null ? "Edit Run" : `Run ${(resultForm.runs?.length||0)+1}`}</div>
                     {/* Element */}
                     <label style={labelStyle}>Search Element</label>
                     <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:6 }}>
-                      {["Interior","Exterior","Vehicle","Container","Buried","Water"].map(el=>(
+                      {orgElements.map(el=>(
                         <button type="button" key={el} onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); setRunResultForm({...runResultForm,element:el}); }} style={{
                           background: runResultForm.element===el?"linear-gradient(135deg,#7c3aed,#06b6d4)":"#fff",
                           color: runResultForm.element===el?"#fff":"#7c3aed",
@@ -1708,7 +1722,26 @@ export default function App() {
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
                       <div>
                         <label style={labelStyle}>Level / Class</label>
-                        <input style={inputStyle} value={runResultForm.level||""} onChange={e=>setRunResultForm({...runResultForm,level:e.target.value})} placeholder="e.g. Novice A"/>
+                        <select
+                          style={inputStyle}
+                          value={isStandardLevel ? runResultForm.level : (runResultForm.level ? "__other__" : "")}
+                          onChange={e=>{
+                            if (e.target.value === "__other__") setRunResultForm({...runResultForm, level: isStandardLevel ? "" : runResultForm.level});
+                            else setRunResultForm({...runResultForm, level: e.target.value});
+                          }}
+                        >
+                          <option value="" disabled>Select level…</option>
+                          {orgLevels.map(l=><option key={l} value={l}>{l}</option>)}
+                          <option value="__other__">Other / not listed…</option>
+                        </select>
+                        {!isStandardLevel && (
+                          <input
+                            style={{ ...inputStyle, marginTop:6 }}
+                            value={runResultForm.level||""}
+                            onChange={e=>setRunResultForm({...runResultForm,level:e.target.value})}
+                            placeholder="Type the exact class (e.g. Handler Discrimination Novice)"
+                          />
+                        )}
                       </div>
                       <div>
                         <label style={labelStyle}>Result</label>
@@ -1763,7 +1796,8 @@ export default function App() {
                       <button type="button" onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); setShowRunResultForm(false); setEditingRunResultIdx(null); setRunResultForm(blankRunResultForm()); }} style={{ ...btnStyle("#aaa"), fontSize:12, padding:"5px 14px" }}>Cancel</button>
                     </div>
                   </div>
-                )}
+                  );
+                })()}
                 {/* Runs list in form */}
                 {(resultForm.runs||[]).map((run,idx)=>(
                   <div key={idx} style={{ background:"#faf5ff", borderRadius:8, padding:"8px 12px", marginBottom:6, border:"1px solid #e9d5ff", display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
