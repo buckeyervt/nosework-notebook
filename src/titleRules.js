@@ -45,6 +45,36 @@ export const ORG_LEVELS = {
   "USCSS/Other": ["Novice", "Intermediate", "Advanced", "Senior", "Master"],
 };
 
+// Everything a trial could plausibly offer, for the "what's being offered at
+// this trial" multi-select on the admin Add Trial form — the main level
+// ladder plus each org's other divisions/specialty classes/games, straight
+// from the cheat sheets. This is deliberately broader than ORG_LEVELS (which
+// is just the main titling ladder used for detection).
+export const ORG_OFFERINGS = {
+  NACSW: [
+    "ORT", "NW1", "NW2", "NW3", "NW3 Elite",
+    "Element Specialty L1", "Element Specialty L2", "Element Specialty L3",
+    "Elite Division", "Summit League", "Skills Achievement Challenge",
+  ],
+  AKC: [
+    "Novice", "Advanced", "Excellent", "Master",
+    "Handler Discrimination Novice", "Handler Discrimination Advanced",
+    "Handler Discrimination Excellent", "Handler Discrimination Master",
+    "Detective Class",
+  ],
+  UKC: [
+    "Novice", "Advanced", "Superior", "Master", "Elite",
+    "Handler Discrimination Novice", "Handler Discrimination Advanced",
+    "Handler Discrimination Excellent", "Handler Discrimination Master",
+  ],
+  "USCSS/Other": [
+    "Novice", "Intermediate", "Advanced", "Senior", "Master", "Detection Dog Extreme",
+    // Games classes
+    "Copy Cat", "Double Dog Dare", "Go the Distance", "Heap O'Hides",
+    "LudicrouSpeed", "Pairs Challenge", "Scenting Sweepstakes", "Team Spirit",
+  ],
+};
+
 function flattenRuns(results, org) {
   // One row per run, tagged with which trial (result record) it came from.
   return (results || [])
@@ -58,17 +88,23 @@ function flattenRuns(results, org) {
     })));
 }
 
-// Strips things like "Novice A" / "Novice Section B" down to just "novice" —
-// AKC (and others) split some levels into Section A/B for entry eligibility,
-// but it's the same searches/criteria either way, so it shouldn't matter for
-// title detection. This also means runs already logged with a section suffix
-// before the Level dropdown existed will still match correctly.
+// Strips things like "Novice A", "Novice-A", "Novice (A)", "Novice Section B"
+// down to just "novice" — AKC (and others) split some levels into Section
+// A/B for entry eligibility, but it's the same searches/criteria either way,
+// so it shouldn't matter for title detection: a Section A leg and a Section B
+// leg both count toward the same element title. This also means runs already
+// logged with a section suffix in any of these formats — before the Level
+// dropdown/Section selector existed — will still match correctly.
 function normalizeLevel(s) {
   return (s || "")
     .trim()
     .toLowerCase()
-    .replace(/\s+section\s+[ab]$/, "")
-    .replace(/\s+[ab]$/, "");
+    .replace(/[()]/g, "")           // "Novice (A)" -> "novice a"
+    .replace(/-/g, " ")             // "Novice-A" -> "novice a"
+    .replace(/\s+/g, " ")           // collapse repeated spaces
+    .trim()
+    .replace(/\s+sec(tion)?\s+[ab]$/, "")  // "novice section a" / "novice sec a" -> "novice"
+    .replace(/\s+[ab]$/, "");              // "novice a" -> "novice"
 }
 function sameLevel(a, b) {
   return normalizeLevel(a) === normalizeLevel(b);
