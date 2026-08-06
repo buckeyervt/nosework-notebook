@@ -34,6 +34,17 @@ export const ORG_ELEMENTS = {
   "USCSS/Other": ["Container", "Exterior", "Interior", "Vehicle"],
 };
 
+// The official level/class ladder for each org, in order. This is the single
+// source of truth for both title detection (below) AND the Level dropdown in
+// the Results run form — so whatever a competitor picks when logging a run
+// is guaranteed to be spelled exactly the way the detection engine expects.
+export const ORG_LEVELS = {
+  NACSW: ["NW1", "NW2", "NW3"],
+  AKC: ["Novice", "Advanced", "Excellent", "Master"],
+  UKC: ["Novice", "Advanced", "Superior", "Master", "Elite"],
+  "USCSS/Other": ["Novice", "Intermediate", "Advanced", "Senior", "Master"],
+};
+
 function flattenRuns(results, org) {
   // One row per run, tagged with which trial (result record) it came from.
   return (results || [])
@@ -47,8 +58,20 @@ function flattenRuns(results, org) {
     })));
 }
 
+// Strips things like "Novice A" / "Novice Section B" down to just "novice" —
+// AKC (and others) split some levels into Section A/B for entry eligibility,
+// but it's the same searches/criteria either way, so it shouldn't matter for
+// title detection. This also means runs already logged with a section suffix
+// before the Level dropdown existed will still match correctly.
+function normalizeLevel(s) {
+  return (s || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+section\s+[ab]$/, "")
+    .replace(/\s+[ab]$/, "");
+}
 function sameLevel(a, b) {
-  return (a || "").trim().toLowerCase() === (b || "").trim().toLowerCase();
+  return normalizeLevel(a) === normalizeLevel(b);
 }
 
 function nextLevelOf(levels, level) {
@@ -112,7 +135,7 @@ export function getTitleDefs(org) {
   if (!elements) return [];
 
   if (org === "AKC") {
-    const levels = ["Novice", "Advanced", "Excellent", "Master"];
+    const levels = ORG_LEVELS.AKC;
     const elCode = { Container: "C", Interior: "I", Exterior: "E", Buried: "B" };
     const lvlCode = { Novice: "N", Advanced: "A", Excellent: "E", Master: "M" };
     // Basic element titles (3 Qs) are what actually let you move that element
@@ -130,7 +153,7 @@ export function getTitleDefs(org) {
   }
 
   if (org === "UKC") {
-    const levels = ["Novice", "Advanced", "Superior", "Master", "Elite"];
+    const levels = ORG_LEVELS.UKC;
     // "Must hold an element's title at the current level before moving that
     // same element up a level" — per-element gating, same as AKC.
     const elDefs = elementTitleDefs("UKC", elements, levels, () => ({ legsNeeded: 2, maxFaultsPerRun: 1 }),
@@ -147,7 +170,7 @@ export function getTitleDefs(org) {
   }
 
   if (org === "USCSS/Other") {
-    const levels = ["Novice", "Intermediate", "Advanced", "Senior", "Master"];
+    const levels = ORG_LEVELS["USCSS/Other"];
     const minPts = { Novice: 85, Intermediate: 85, Advanced: 90, Senior: 100, Master: 100 };
     // USCSS gates by the FULL level title (all 4 elements), not per element —
     // "earning any level's title unlocks the next level."
@@ -171,7 +194,7 @@ export function getTitleDefs(org) {
   }
 
   if (org === "NACSW") {
-    const levels = ["NW1", "NW2", "NW3"];
+    const levels = ORG_LEVELS.NACSW;
     // NACSW gates by the full-day, all-4-elements level title.
     const lvlDefs = levels.map(level => ({
       org: "NACSW", method: "singleTrialAllElements", elements, level, maxTotalFaults: 3,
@@ -238,7 +261,7 @@ export function detectEarnedTitles(org, results) {
   // directly from the leg count rather than a fixed list of defs, since the
   // number of tiers a dog can reach is unbounded and dog-specific.
   if (org === "AKC") {
-    const levels = ["Novice", "Advanced", "Excellent", "Master"];
+    const levels = ORG_LEVELS.AKC;
     const elements = ORG_ELEMENTS.AKC;
     const elCode = { Container: "C", Interior: "I", Exterior: "E", Buried: "B" };
     const lvlCode = { Novice: "N", Advanced: "A", Excellent: "E", Master: "M" };
