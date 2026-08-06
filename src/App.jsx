@@ -32,8 +32,17 @@ const TRAINING_TABS = ["Dashboard", "Class Progress", "Training", "My Dogs", "Ru
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.22";
+const APP_VERSION = "1.23";
 const WHATS_NEW = [
+  {
+    version: "1.23",
+    date: "August 2026",
+    title: "Cleaner Class Display & Bulk Selection",
+    items: [
+      "🏷️ Classes/levels offered at a trial now show as separate pill tags instead of one run-together string.",
+      "⚡ Admin Add Trial form: tap any number of classes/levels at once instead of adding them one at a time through a dropdown — much faster for trials offering a lot of classes.",
+    ],
+  },
   {
     version: "1.22",
     date: "August 2026",
@@ -1314,14 +1323,27 @@ export default function App() {
                     </span>
                   ))}
                 </div>
-                <select
-                  style={inputStyle}
-                  value=""
-                  onChange={e=>{ const v=e.target.value; if (v && !(trialForm.level||[]).includes(v)) setTrialForm({...trialForm, level:[...(trialForm.level||[]), v]}); }}
-                >
-                  <option value="">+ Add a class/level offered…</option>
-                  {(ORG_OFFERINGS[trialForm.org]||[]).filter(o=>!(trialForm.level||[]).includes(o)).map(o=><option key={o} value={o}>{o}</option>)}
-                </select>
+                <div style={{ fontSize:11, color:"#888", marginBottom:6 }}>Tap as many as apply — no need to add them one at a time:</div>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:5, marginBottom:10 }}>
+                  {(ORG_OFFERINGS[trialForm.org]||[]).map(o=>{
+                    const isSelected = (trialForm.level||[]).includes(o);
+                    return (
+                      <button
+                        type="button"
+                        key={o}
+                        onClick={()=>setTrialForm({...trialForm, level: isSelected ? (trialForm.level||[]).filter(x=>x!==o) : [...(trialForm.level||[]), o]})}
+                        style={{
+                          background: isSelected ? "linear-gradient(135deg,#7c3aed,#06b6d4)" : "#fff",
+                          color: isSelected ? "#fff" : "#7c3aed",
+                          border: `1px solid ${isSelected?"transparent":"#ddd6fe"}`,
+                          borderRadius:20, padding:"4px 12px", fontSize:11, cursor:"pointer", fontWeight: isSelected?"bold":"normal"
+                        }}
+                      >
+                        {isSelected ? "✓ " : ""}{o}
+                      </button>
+                    );
+                  })}
+                </div>
                 <div style={{ display:"flex", gap:6, marginTop:6, marginBottom:2 }}>
                   <input
                     style={{ ...inputStyle, marginBottom:0 }}
@@ -1739,8 +1761,17 @@ export default function App() {
                       <div style={{ fontWeight:"bold", fontSize:14, color: isPast?"#888":"#1e1b4b" }}>{t.name}</div>
                       <div style={{ fontSize:11, color:"#888", marginTop:2 }}>
                         <OrgBadge org={t.org}/>
-                        {(Array.isArray(t.level) ? t.level.join(", ") : t.level) ? ` · ${Array.isArray(t.level) ? t.level.join(", ") : t.level}` : ""}
                       </div>
+                      {(() => {
+                        const levels = Array.isArray(t.level) ? t.level : (t.level ? [t.level] : []);
+                        return levels.length > 0 && (
+                          <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginTop:4 }}>
+                            {levels.map((lv,i) => (
+                              <span key={i} style={{ background:"#f0f9ff", color:"#0369a1", borderRadius:20, padding:"1px 8px", fontSize:10, fontWeight:"bold" }}>{lv}</span>
+                            ))}
+                          </div>
+                        );
+                      })()}
                       <div style={{ fontSize:12, color:"#555", marginTop:5 }}>
                         📅 <b>{t.date}</b> ·{" "}
                         <span onClick={()=>openMaps(t.location)} style={{ color:"#7c3aed", cursor:"pointer", textDecoration:"underline" }}>
