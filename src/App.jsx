@@ -31,8 +31,18 @@ const TRAINING_TABS = ["Dashboard", "Class Progress", "Training", "My Dogs", "Ru
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.11";
+const APP_VERSION = "1.12";
 const WHATS_NEW = [
+  {
+    version: "1.12",
+    date: "August 2026",
+    title: "Class Progress Upgrades",
+    items: [
+      "🎥 Each class in the foundations program now has an optional video link.",
+      "📸 Every level gets its own completion photo spot — no need to wait until the very end to celebrate.",
+      "📝 Class notes now save properly and show as plain text with Edit/Delete options, instead of staying stuck in an editable box.",
+    ],
+  },
   {
     version: "1.11",
     date: "August 2026",
@@ -150,7 +160,8 @@ const blankDog = () => ({ id: Date.now().toString(), callName:"", name:"", breed
 const blankClassProgress = () => ({
   levels: Array.from({ length: 6 }, (_, i) => ({
     level: i + 1,
-    classes: Array.from({ length: 4 }, (_, j) => ({ classNum: j + 1, attended: false, notes: "" })),
+    classes: Array.from({ length: 4 }, (_, j) => ({ classNum: j + 1, attended: false, notes: "", videoLink: "" })),
+    completionPhotoUrl: "",
   })),
   graduationPhotoUrl: "",
 });
@@ -239,6 +250,8 @@ export default function App() {
   const [allClassProgress, setAllClassProgress] = useState({});
   const [expandedLevels, setExpandedLevels] = useState(new Set([1]));
   const [gradPhotoFile, setGradPhotoFile]   = useState(null);
+  const [editingNoteKey, setEditingNoteKey] = useState(null); // "levelIdx-classIdx" or null
+  const [classNoteDraft, setClassNoteDraft] = useState("");
   const [deleteConfirm, setDeleteConfirm]   = useState(null);
   const [onboardStep, setOnboardStep]       = useState(0);
   const [onboardDog, setOnboardDog]         = useState(blankDog());
@@ -794,18 +807,74 @@ export default function App() {
     setAllClassProgress(newAll);
     await saveUserData({ classProgress: newAll });
   }
-  async function updateClassNotes(levelIdx, classIdx, notes) {
+  function startEditClassNote(levelIdx, classIdx, currentNotes) {
+    setEditingNoteKey(`${levelIdx}-${classIdx}`);
+    setClassNoteDraft(currentNotes || "");
+  }
+  function cancelEditClassNote() {
+    setEditingNoteKey(null);
+    setClassNoteDraft("");
+  }
+  async function saveClassNote(levelIdx, classIdx) {
     if (!activeDog) return;
     const cp = allClassProgress[activeDog.id] || blankClassProgress();
     const levels = cp.levels.map((lvl,li) => li!==levelIdx ? lvl : {
-      ...lvl, classes: lvl.classes.map((c,ci) => ci!==classIdx ? c : { ...c, notes })
+      ...lvl, classes: lvl.classes.map((c,ci) => ci!==classIdx ? c : { ...c, notes: classNoteDraft })
+    });
+    const newCp = { ...cp, levels };
+    const newAll = { ...allClassProgress, [activeDog.id]: newCp };
+    setAllClassProgress(newAll);
+    await saveUserData({ classProgress: newAll });
+    setEditingNoteKey(null);
+    setClassNoteDraft("");
+  }
+  async function deleteClassNote(levelIdx, classIdx) {
+    if (!activeDog) return;
+    if (!window.confirm("Delete this note?")) return;
+    const cp = allClassProgress[activeDog.id] || blankClassProgress();
+    const levels = cp.levels.map((lvl,li) => li!==levelIdx ? lvl : {
+      ...lvl, classes: lvl.classes.map((c,ci) => ci!==classIdx ? c : { ...c, notes: "" })
+    });
+    const newCp = { ...cp, levels };
+    const newAll = { ...allClassProgress, [activeDog.id]: newCp };
+    setAllClassProgress(newAll);
+    await saveUserData({ classProgress: newAll });
+    if (editingNoteKey === `${levelIdx}-${classIdx}`) cancelEditClassNote();
+  }
+  function updateClassVideo(levelIdx, classIdx, videoLink) {
+    if (!activeDog) return;
+    const cp = allClassProgress[activeDog.id] || blankClassProgress();
+    const levels = cp.levels.map((lvl,li) => li!==levelIdx ? lvl : {
+      ...lvl, classes: lvl.classes.map((c,ci) => ci!==classIdx ? c : { ...c, videoLink })
     });
     const newCp = { ...cp, levels };
     setAllClassProgress({ ...allClassProgress, [activeDog.id]: newCp });
   }
-  async function saveClassNotes(levelIdx, classIdx) {
+  async function saveClassVideo(levelIdx, classIdx) {
     if (!activeDog) return;
     await saveUserData({ classProgress: allClassProgress });
+  }
+  async function handleLevelPhoto(levelIdx, file) {
+    if (!file || !user || !activeDog) return;
+    if (!navigator.onLine) {
+      alert("You're offline right now — photo uploads need a connection. Try again once you're back in range.");
+      return;
+    }
+    try {
+      const level = (allClassProgress[activeDog.id] || blankClassProgress()).levels[levelIdx]?.level;
+      const storageRef = ref(storage, `level-photos/${user.uid}/${activeDog.id}/level-${level}`);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      const cp = allClassProgress[activeDog.id] || blankClassProgress();
+      const levels = cp.levels.map((lvl,li) => li!==levelIdx ? lvl : { ...lvl, completionPhotoUrl: url });
+      const newCp = { ...cp, levels };
+      const newAll = { ...allClassProgress, [activeDog.id]: newCp };
+      setAllClassProgress(newAll);
+      await saveUserData({ classProgress: newAll });
+    } catch (e) {
+      console.error("Level photo upload error:", e);
+      alert("Photo upload failed. Please try again.");
+    }
   }
   async function handleGradPhoto(file) {
     if (!file || !user || !activeDog) return;
@@ -1986,21 +2055,76 @@ export default function App() {
                         </div>
                         {isExpanded && (
                           <div style={{ padding:"0 14px 14px" }}>
-                            {lvl.classes.map((c, classIdx) => (
-                              <div key={c.classNum} style={{ background:"#faf5ff", borderRadius:8, padding:"10px 12px", marginBottom:8, border:"1px solid #e9d5ff" }}>
-                                <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", marginBottom:6 }}>
-                                  <input type="checkbox" checked={c.attended} onChange={()=>toggleClassAttended(levelIdx, classIdx)} style={{ width:16, height:16 }}/>
-                                  <span style={{ fontSize:13, fontWeight:"bold", color: c.attended?"#27ae60":"#5b21b6" }}>Class {c.classNum}{c.attended?" · Attended ✓":""}</span>
+                            {lvl.classes.map((c, classIdx) => {
+                              const noteKey = `${levelIdx}-${classIdx}`;
+                              const isEditingNote = editingNoteKey === noteKey;
+                              return (
+                                <div key={c.classNum} style={{ background:"#faf5ff", borderRadius:8, padding:"10px 12px", marginBottom:8, border:"1px solid #e9d5ff" }}>
+                                  <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", marginBottom:8 }}>
+                                    <input type="checkbox" checked={c.attended} onChange={()=>toggleClassAttended(levelIdx, classIdx)} style={{ width:16, height:16 }}/>
+                                    <span style={{ fontSize:13, fontWeight:"bold", color: c.attended?"#27ae60":"#5b21b6" }}>Class {c.classNum}{c.attended?" · Attended ✓":""}</span>
+                                  </label>
+
+                                  {isEditingNote ? (
+                                    <div style={{ marginBottom:8 }}>
+                                      <input
+                                        autoFocus
+                                        style={{ ...inputStyle, fontSize:12, marginBottom:6 }}
+                                        placeholder="Notes from this class…"
+                                        value={classNoteDraft}
+                                        onChange={e=>setClassNoteDraft(e.target.value)}
+                                        onKeyDown={e=>{ if (e.key==="Enter") saveClassNote(levelIdx, classIdx); }}
+                                      />
+                                      <div style={{ display:"flex", gap:6 }}>
+                                        <button type="button" onClick={()=>saveClassNote(levelIdx, classIdx)} style={{ ...btnStyle("#27ae60"), padding:"4px 12px", fontSize:11 }}>Save</button>
+                                        <button type="button" onClick={cancelEditClassNote} style={{ ...btnStyle("#aaa"), padding:"4px 12px", fontSize:11 }}>Cancel</button>
+                                      </div>
+                                    </div>
+                                  ) : c.notes ? (
+                                    <div style={{ marginBottom:8 }}>
+                                      <div style={{ fontSize:12, color:"#444", background:"#fff", borderRadius:6, padding:"6px 8px", marginBottom:6, whiteSpace:"pre-wrap" }}>{c.notes}</div>
+                                      <div style={{ display:"flex", gap:14 }}>
+                                        <button type="button" onClick={()=>startEditClassNote(levelIdx, classIdx, c.notes)} style={{ background:"none", border:"none", color:"#7c3aed", fontSize:11, fontWeight:"bold", cursor:"pointer", padding:0 }}>Edit</button>
+                                        <button type="button" onClick={()=>deleteClassNote(levelIdx, classIdx)} style={{ background:"none", border:"none", color:"#c0392b", fontSize:11, fontWeight:"bold", cursor:"pointer", padding:0 }}>Delete</button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <button type="button" onClick={()=>startEditClassNote(levelIdx, classIdx, "")} style={{ background:"none", border:"none", color:"#888", fontSize:12, cursor:"pointer", padding:0, marginBottom:8, textDecoration:"underline" }}>+ Add note</button>
+                                  )}
+
+                                  <input
+                                    style={{ ...inputStyle, fontSize:12, marginBottom:0 }}
+                                    placeholder="🎥 Video link (optional)"
+                                    value={c.videoLink||""}
+                                    onChange={e=>updateClassVideo(levelIdx, classIdx, e.target.value)}
+                                    onBlur={()=>saveClassVideo(levelIdx, classIdx)}
+                                  />
+                                  {c.videoLink && (
+                                    <button type="button" onClick={()=>window.open(c.videoLink,"_blank")} style={{ display:"flex", alignItems:"center", gap:6, background:"#f0fdf4", color:"#16a34a", border:"1px solid #86efac", borderRadius:8, padding:"4px 10px", fontSize:11, cursor:"pointer", marginTop:6, fontWeight:"bold" }}>
+                                      🎥 Watch Video →
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {/* Level completion photo */}
+                            <div style={{ background:"#fffbeb", borderRadius:8, padding:"10px 12px", border:"1px solid #fde68a", marginTop:2 }}>
+                              <div style={{ fontWeight:"bold", fontSize:12, color:"#92400e", marginBottom:6 }}>📸 Level {lvl.level} Completion Photo</div>
+                              {lvl.completionPhotoUrl ? (
+                                <div>
+                                  <img src={lvl.completionPhotoUrl} alt={`Level ${lvl.level} completion`} style={{ width:"100%", maxHeight:220, objectFit:"cover", borderRadius:8, marginBottom:6 }}/>
+                                  <label style={{ fontSize:11, color:"#b45309", cursor:"pointer", textDecoration:"underline" }}>
+                                    Replace photo
+                                    <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>handleLevelPhoto(levelIdx, e.target.files[0])}/>
+                                  </label>
+                                </div>
+                              ) : (
+                                <label style={{ cursor:"pointer", display:"flex", alignItems:"center", gap:8, fontSize:12, color:"#b45309" }}>
+                                  <span style={{ fontSize:18 }}>📸</span> {levelComplete ? "Tap to add a photo of completing this level" : "Add a photo once this level is complete"}
+                                  <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>handleLevelPhoto(levelIdx, e.target.files[0])}/>
                                 </label>
-                                <input
-                                  style={{ ...inputStyle, fontSize:12, marginBottom:0 }}
-                                  placeholder="Notes from this class…"
-                                  value={c.notes}
-                                  onChange={e=>updateClassNotes(levelIdx, classIdx, e.target.value)}
-                                  onBlur={()=>saveClassNotes(levelIdx, classIdx)}
-                                />
-                              </div>
-                            ))}
+                              )}
+                            </div>
                           </div>
                         )}
                       </div>
