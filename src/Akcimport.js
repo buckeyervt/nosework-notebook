@@ -4,12 +4,17 @@
 // records matching this app's Firestore "trials" schema, so Tina doesn't have
 // to hand-type every new Scent Work trial into the admin panel.
 //
-// Why column POSITION instead of header name: AKC's own header row has
-// inconsistent spacing/typos ("Opening Day/ Time" vs "Closing Date/Time",
-// "Time Zome", "Superintendent/ Secretary Email" vs "...Secretary Phone" with
-// no space) — matching by exact header text would be fragile. Column order is
-// far more stable than AKC's header spelling, so we map by index and just
-// sanity-check the first couple of headers before trusting the rest.
+// Columns are matched by HEADER NAME (normalized — lowercased, punctuation
+// and spaces stripped), not by position. That means:
+//   - You can delete any columns you don't want before uploading (Eligible
+//     Breeds, Event Chair info, Time Zone, etc.) — only the ones this file
+//     actually uses need to stay.
+//   - Columns can be in any order.
+//   - Header spacing/typo differences in AKC's own export ("Opening Day/
+//     Time" vs "Closing Date/Time", "Time Zome") don't matter, since they all
+//     normalize the same way.
+// The only hard requirement is that a "Name" column and a "Start Date" column
+// exist somewhere in the file with a header row above the data.
 //
 // What's NOT in this export (AKC's public search doesn't include it): entry
 // link, premium/flyer link, and the specific class/level being offered. Those
@@ -17,15 +22,32 @@
 // so they show up under the existing "⚠️ Needs Info" filter in the admin
 // panel as a to-do list.
 
-const COLS = {
-  NAME: 0, EVENT_NUMBER: 1, EVENT_TYPE: 2, LOCATION: 3, ADDRESS: 4, CITY: 5, STATE: 6,
-  START_DAY: 7, START_DATE: 8, ENTRY_METHOD: 9, ENTRY_LIMIT: 10,
-  OPENING_DAY: 11, OPENING_DATETIME: 12, CLOSING_DAY: 13, CLOSING_DATETIME: 14, TIME_ZONE: 15,
-  SEC_NAME: 16, SEC_PHONE: 17, SEC_EMAIL: 18, CHAIR_NAME: 19, CHAIR_PHONE: 20, CHAIR_EMAIL: 21,
-  ELIGIBLE_BREEDS: 22, ENTRY_FEE: 23,
+// Canonical field -> normalized header name it should match.
+// normalize() strips everything but letters/digits and lowercases, so
+// "Opening Day/ Time", "Opening Day Time", and "OpeningDay/Time" all become
+// the same key here — no alias list needed for spacing/punctuation variants.
+const FIELD_HEADERS = {
+  name: "name",
+  eventNumber: "eventnumber",
+  eventType: "eventtype",
+  location: "location",
+  address: "address",
+  city: "city",
+  state: "state",
+  startDate: "startdate",
+  openingDateTime: "openingdaytime",
+  closingDateTime: "closingdatetime",
+  secName: "superintendentsecretaryname",
+  secPhone: "superintendentsecretaryphone",
+  secEmail: "superintendentsecretaryemail",
+  entryFee: "entryfee",
 };
 
 const MONTHS = { Jan:"01",Feb:"02",Mar:"03",Apr:"04",May:"05",Jun:"06",Jul:"07",Aug:"08",Sep:"09",Oct:"10",Nov:"11",Dec:"12" };
+
+function normalize(s) {
+  return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
 
 // Handles quoted CSV fields with embedded commas and doubled-quote escaping
 // (e.g. "Dog Gone Fun Agility, LLC #2; 26310 Dobbin Huffsmith Rd").
@@ -61,58 +83,89 @@ function parseAkcDate(raw) {
   return `${yyyy}-${mm}-${dd.padStart(2, "0")}`;
 }
 
+// Scans the file for a row that contains both a "Name" and a "Start Date"
+// header (in any position, among any other columns) — that's the real header
+// row. AKC's export has a few metadata lines above it ("Club: All clubs" etc)
+// that this skips automatically.
+function findHeaderRow(lines) {
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i] || !lines[i].includes(",")) continue;
+    const cells = parseCsvLine(lines[i]);
+    const normCells = cells.map(normalize);
+    if (normCells.includes(FIELD_HEADERS.name) && normCells.includes(FIELD_HEADERS.startDate)) {
+      return { idx: i, cells };
+    }
+  }
+  return null;
+}
+
 // Returns { error: string|null, rows: [...] }. `rows` are ready to hand to
 // Firestore as-is (each has a stable `id` so re-importing the same export is
 // safe — it'll just overwrite with the same data, not duplicate).
 export function parseAKCEventCsv(text) {
   const lines = (text || "").split(/\r?\n/);
-  const headerIdx = lines.findIndex(l => l.trim().replace(/^"|"$/g, "").trim() === "Name" || l.trim().startsWith('"Name","Event Number"'));
-  if (headerIdx === -1) {
-    return { error: "Couldn't find the header row (expected a line starting with \"Name\",\"Event Number\"...). Is this an AKC Event Search CSV export?", rows: [] };
+  const header = findHeaderRow(lines);
+  if (!header) {
+    return { error: "Couldn't find a header row with \"Name\" and \"Start Date\" columns. Make sure those two columns are still in the file.", rows: [] };
   }
-  const headerCells = parseCsvLine(lines[headerIdx]);
-  if ((headerCells[COLS.NAME] || "").toLowerCase() !== "name" || !(headerCells[COLS.START_DATE] || "").toLowerCase().includes("start date")) {
-    return { error: "This doesn't look like a standard AKC Event Search export — the columns are in an unexpected order.", rows: [] };
-  }
+  const normHeaders = header.cells.map(normalize);
+  const colIndex = {};
+  Object.entries(FIELD_HEADERS).forEach(([field, wanted]) => {
+    const idx = normHeaders.indexOf(wanted);
+    if (idx !== -1) colIndex[field] = idx;
+  });
+  const get = (cells, field) => (colIndex[field] != null ? (cells[colIndex[field]] || "").trim() : "");
 
   const rows = [];
   const skipped = [];
-  for (let i = headerIdx + 1; i < lines.length; i++) {
+  for (let i = header.idx + 1; i < lines.length; i++) {
     const line = lines[i];
     if (!line || !line.trim()) continue;
     const c = parseCsvLine(line);
-    if (c.length < 9) continue;
+    if (c.every(cell => !cell)) continue; // blank row
 
-    const eventType = c[COLS.EVENT_TYPE] || "";
-    if (eventType && eventType !== "SCWK") { skipped.push({ line: i + 1, reason: `Event Type "${eventType}", not Scent Work` }); continue; }
+    // Only filter by Event Type if that column is actually present — if it
+    // was trimmed out of the file, trust that the whole export is Scent Work.
+    const eventType = get(c, "eventType");
+    if (colIndex.eventType != null && eventType && eventType !== "SCWK") {
+      skipped.push({ line: i + 1, reason: `Event Type "${eventType}", not Scent Work` });
+      continue;
+    }
 
-    const name = c[COLS.NAME] || "";
-    const date = parseAkcDate(c[COLS.START_DATE]);
+    const name = get(c, "name");
+    const date = parseAkcDate(get(c, "startDate"));
     if (!name || !date) { skipped.push({ line: i + 1, reason: "Missing club name or start date" }); continue; }
 
-    const eventNumber = c[COLS.EVENT_NUMBER] || "";
-    const city = c[COLS.CITY] || "";
-    const state = c[COLS.STATE] || "";
-    const address = c[COLS.ADDRESS] || "";
-    const venueNote = c[COLS.LOCATION] ? ` (${c[COLS.LOCATION]})` : "";
-    const secName = c[COLS.SEC_NAME] || "";
-    const secPhone = c[COLS.SEC_PHONE] || "";
-    const secEmail = c[COLS.SEC_EMAIL] || "";
-    const entryFee = c[COLS.ENTRY_FEE] || "";
+    const eventNumber = get(c, "eventNumber");
+    const city = get(c, "city");
+    const state = get(c, "state");
+    const address = get(c, "address");
+    const locationNote = get(c, "location");
+    const venueNote = locationNote ? ` (${locationNote})` : "";
+    const secName = get(c, "secName");
+    const secPhone = get(c, "secPhone");
+    const secEmail = get(c, "secEmail");
+    const entryFee = get(c, "entryFee");
+    const secLine = [secName, secPhone, secEmail].filter(Boolean).join(" ");
 
     rows.push({
       id: eventNumber ? `AKC-${eventNumber}` : `AKC-${date}-${i}`,
       org: "AKC",
-      name: `${name} – ${city}${city && state ? ", " : ""}${state}`,
+      name: `${name}${city || state ? ` – ${[city, state].filter(Boolean).join(", ")}` : ""}`,
       date,
       location: [address, city, state].filter(Boolean).join(", ") + venueNote,
-      level: "",
-      entryOpens: parseAkcDate(c[COLS.OPENING_DATETIME]),
-      entryDeadline: parseAkcDate(c[COLS.CLOSING_DATETIME]),
+      level: [],
+      entryOpens: parseAkcDate(get(c, "openingDateTime")),
+      entryDeadline: parseAkcDate(get(c, "closingDateTime")),
       entryLink: "",
       premiumLink: "",
       notes: "",
-      adminNotes: `Imported from AKC CSV (Event #${eventNumber || "?"}). Secretary: ${secName} ${secPhone} ${secEmail}. Entry fee: ${entryFee}`.trim(),
+      adminNotes: [
+        "Imported from AKC CSV",
+        eventNumber ? `(Event #${eventNumber})` : "",
+        secLine ? `Secretary: ${secLine}.` : "",
+        entryFee ? `Entry fee: ${entryFee}` : "",
+      ].filter(Boolean).join(" ").trim(),
       needsInfo: true,
       _eventNumber: eventNumber,
     });
