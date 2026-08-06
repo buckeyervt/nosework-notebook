@@ -32,8 +32,16 @@ const TRAINING_TABS = ["Dashboard", "Class Progress", "Training", "My Dogs", "Ru
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.21";
+const APP_VERSION = "1.22";
 const WHATS_NEW = [
+  {
+    version: "1.22",
+    date: "August 2026",
+    title: "CSV Import Date Fix",
+    items: [
+      "🐛 Fixed the AKC CSV importer silently skipping every row when dates come in as 2-digit years (e.g. \"7-Aug-26\") — which is what happens if the file gets opened and re-saved in Excel. It now also handles slash-style dates as a safety net.",
+    ],
+  },
   {
     version: "1.21",
     date: "August 2026",
