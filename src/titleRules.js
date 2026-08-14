@@ -84,14 +84,17 @@ export const ORG_OFFERINGS = {
 // ── USCSS Games ──────────────────────────────────────────────────
 // Games aren't leveled — each one has a single fixed pass bar (Table 6 in
 // the rulebook): a minimum point score and a max number of false alerts.
-// One qualifying run in a game earns that game's title outright (no leg
-// count, unlike Elements). This exact list is also what should populate
-// the "Game" dropdown wherever a competitor logs a game run, so the names
-// always match what this engine is looking for.
+// Just like an Element title, a game's title needs 3 qualifying runs (Qs)
+// of that SAME game (rulebook p.25 / uscaninescentsports.com/rules/titles) —
+// not one. This exact list is also what should populate the "Game" dropdown
+// wherever a competitor logs a game run, so the names always match what
+// this engine is looking for.
 export const GAME_NAMES = [
   "Copy Cat", "Double Dog Dare", "Go the Distance", "Heap O'Hides",
   "LudicrouSpeed", "Pairs Challenge", "Scenting Sweepstakes", "Team Spirit",
 ];
+
+const GAME_LEGS_NEEDED = 3;
 
 const GAME_CRITERIA = {
   "Copy Cat":             { code: "DDCC", name: "Detection Dog Copy Cat",        minPoints: 95, maxFaults: 0 },
@@ -405,33 +408,42 @@ export function detectEarnedTitles(org, results) {
   }
 
   // ── USCSS Games ────────────────────────────────────────────────
-  // Per Table 6/7/8 of the rulebook:
-  //   - Each game's own title (DDCC, DDFO...) is earned with 1 qualifying run.
+  // Per the rulebook (p.25) and the USCSS Titles page:
+  //   - Each game's own title (DDCC, DDFO...) needs 3 qualifying runs (Qs)
+  //     of that SAME game — exactly like an Element title.
   //   - DDGA needs titles in 5 DIFFERENT games; Bronze/Silver/Gold add a
   //     6th/7th/8th different game (Gold = all 8, since that's the whole list).
   //   - DDGP doesn't require different games — it's earned once 10 total
-  //     qualifying game runs have accumulated (repeats of the same game
-  //     count), then DDGPX repeats every 5 more after that.
+  //     "Game Titles" have accumulated (each Game Title = another 3 Qs, in
+  //     any game, repeats of the same game included), then DDGPX repeats
+  //     every 5 more Game Titles after that.
   //   - Championship (DDCH) = a Master level title + DDGA.
   if (org === "USCSS/Other") {
     const gameRuns = flat.filter(run => run.isGame && GAME_CRITERIA[run.gameName]);
 
-    // Individual game titles — date of the FIRST qualifying run in each game.
-    const titledGames = [];
+    const titledGames = [];  // one entry per game with >=1 title — for the Gamer ladder
+    const titleEvents = [];  // one entry per every 3 Qs earned in ANY game — for Gamer Pro
+
     for (const gname of GAME_NAMES) {
       const crit = GAME_CRITERIA[gname];
       const qualifying = gameRuns
         .filter(run => run.gameName === gname && gameQualifies(run, crit))
         .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-      if (qualifying.length > 0) {
-        const first = qualifying[0];
+      const titlesInGame = Math.floor(qualifying.length / GAME_LEGS_NEEDED);
+      if (titlesInGame > 0) {
+        const firstGroup = qualifying.slice(0, GAME_LEGS_NEEDED);
+        const firstDate = firstGroup[firstGroup.length - 1].date;
         earned.push({
           key: `USCSS/Other|game|${gname}`,
-          label: `${crit.code} (${crit.name} — ${gname} Game Title)`,
-          org, date: first.date, trialName: first.trialName, trialId: first.trialId,
+          label: `${crit.code} (${crit.name} — ${gname} Game Title, 3 Qs)`,
+          org, date: firstDate, trialName: firstGroup[firstGroup.length - 1].trialName, trialId: firstGroup[firstGroup.length - 1].trialId,
           nextLevel: null,
         });
-        titledGames.push({ name: gname, date: first.date });
+        titledGames.push({ name: gname, date: firstDate });
+        for (let t = 0; t < titlesInGame; t++) {
+          const group = qualifying.slice(t * GAME_LEGS_NEEDED, t * GAME_LEGS_NEEDED + GAME_LEGS_NEEDED);
+          titleEvents.push({ date: group[group.length - 1].date });
+        }
       }
     }
 
@@ -453,19 +465,17 @@ export function detectEarnedTitles(org, results) {
       }
     }
 
-    // Gamer Pro — every qualifying game run counts toward the running
-    // total, repeats of the same game included: 10 for DDGP, then +5 for
-    // each DDGPX after that.
-    const allQualifyingRuns = gameRuns
-      .filter(run => gameQualifies(run, GAME_CRITERIA[run.gameName]))
-      .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-    if (allQualifyingRuns.length >= 10) {
+    // Gamer Pro — every Game Title counts toward the running total (3 Qs =
+    // 1 Game Title, repeats of the same game included): 10 for DDGP, then
+    // +5 for each DDGPX after that.
+    titleEvents.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    if (titleEvents.length >= 10) {
       earned.push({
         key: "USCSS/Other|gamerPro|0",
         label: "DDGP (Detection Dog Gamer Pro — 10 Game titles)",
-        org, date: allQualifyingRuns[9]?.date, trialName: null, trialId: null, nextLevel: null,
+        org, date: titleEvents[9]?.date, trialName: null, trialId: null, nextLevel: null,
       });
-      const extraTiers = Math.floor((allQualifyingRuns.length - 10) / 5);
+      const extraTiers = Math.floor((titleEvents.length - 10) / 5);
       for (let t = 1; t <= extraTiers; t++) {
         const idx = 10 + t * 5 - 1;
         earned.push({
@@ -473,7 +483,7 @@ export function detectEarnedTitles(org, results) {
           label: t === 1
             ? `DDGPX (Detection Dog Gamer Pro X — ${10 + t * 5} Game titles)`
             : `DDGPX${t} (Detection Dog Gamer Pro X ${t} — ${10 + t * 5} Game titles)`,
-          org, date: allQualifyingRuns[idx]?.date, trialName: null, trialId: null, nextLevel: null,
+          org, date: titleEvents[idx]?.date, trialName: null, trialId: null, nextLevel: null,
         });
       }
     }
