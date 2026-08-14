@@ -46,13 +46,25 @@ function highestOrgBadges(results) {
       const lvl = levels[i];
       if (earnedKeys.has(`${org}|level|${lvl}`) || earnedKeys.has(`${org}|classic|${lvl}`)) { highestLevel = lvl; break; }
     }
-    const manualForOrg = (results || []).filter(r => r.org === org && r.isTitleOnly && r.title);
+    // Finishing ONE element (or an Elite tier, or a Game title) is not the
+    // same as finishing the whole level — those get saved with an autoKey
+    // once confirmed from a suggestion, so only a hand-typed entry with NO
+    // autoKey at all (a true "I earned this before I started using the
+    // app" note), or one whose autoKey IS itself a level/classic key, is
+    // eligible to stand in for the level badge when the engine hasn't
+    // detected a full level yet.
+    const isLevelKey = (key) => key.startsWith(`${org}|level|`) || key.startsWith(`${org}|classic|`);
+    const fallbackCandidates = (results || []).filter(r =>
+      r.org === org && r.isTitleOnly && r.title && (!r.autoKey || isLevelKey(r.autoKey))
+    );
     let hasBonus = org === "AKC" && earned.some(e => e.key.startsWith("AKC|eliteLevel|") || e.key.startsWith("AKC|elite|"));
-    if (!hasBonus) hasBonus = manualForOrg.some(r => /elite|summit|champion/i.test(r.title));
+    if (!hasBonus) {
+      hasBonus = (results || []).some(r => r.org === org && r.isTitleOnly && r.title && /elite|summit|champion/i.test(r.title));
+    }
     if (highestLevel) {
       badges.push({ org, abbr: (LEVEL_ABBR[org] ? LEVEL_ABBR[org](highestLevel) : highestLevel), hasBonus });
-    } else if (manualForOrg.length > 0) {
-      const latest = manualForOrg.slice().sort((a, b) => (a.date || "").localeCompare(b.date || "")).pop();
+    } else if (fallbackCandidates.length > 0) {
+      const latest = fallbackCandidates.slice().sort((a, b) => (a.date || "").localeCompare(b.date || "")).pop();
       badges.push({ org, abbr: (latest.title || "").slice(0, 6), hasBonus });
     }
   }
@@ -61,11 +73,20 @@ function highestOrgBadges(results) {
 // Compact pill row for a dog's name — one pill per org she's titled in,
 // colored by org, showing the highest level held; a small star means she
 // also holds a bonus/Elite-style tier at an earlier level in that same org.
-function DogTitleBadges({ results }) {
+// `dark` swaps to a solid-fill/white-text style for use on the purple
+// header gradient, where the usual light-tint pill wouldn't have enough
+// contrast.
+function DogTitleBadges({ results, dark = false, size = 11 }) {
   const badges = highestOrgBadges(results);
   if (badges.length === 0) return null;
   return badges.map(b => (
-    <span key={b.org} style={{ position: "relative", display: "inline-block", background: (ORG_COLORS[b.org] || "#999") + "22", color: ORG_COLORS[b.org] || "#999", borderRadius: 20, padding: "2px 9px", fontSize: 11, fontWeight: "bold" }} title={`${b.org} — ${b.abbr}${b.hasBonus ? " + bonus tier" : ""}`}>
+    <span key={b.org} style={{
+      position: "relative", display: "inline-block",
+      background: dark ? (ORG_COLORS[b.org] || "#999") : (ORG_COLORS[b.org] || "#999") + "22",
+      color: dark ? "#fff" : (ORG_COLORS[b.org] || "#999"),
+      border: dark ? "1px solid rgba(255,255,255,0.4)" : "none",
+      borderRadius: 20, padding: dark ? "1px 7px" : "2px 9px", fontSize: size, fontWeight: "bold",
+    }} title={`${b.org} — ${b.abbr}${b.hasBonus ? " + bonus tier" : ""}`}>
       {b.abbr}
       {b.hasBonus && <span style={{ position: "absolute", top: -6, right: -6, fontSize: 9 }}>⭐</span>}
     </span>
@@ -90,8 +111,18 @@ const TRAINING_TABS = [...PRIMARY_TRAINING_TABS, ...MORE_TRAINING_TABS];
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.27";
+const APP_VERSION = "1.28";
 const WHATS_NEW = [
+  {
+    version: "1.28",
+    date: "August 2026",
+    title: "Title Badge Fixes",
+    items: [
+      "🏅 The title badge now also shows in the main header next to your dog's name, not just on My Dogs.",
+      "🐛 Fixed the badge showing up as soon as one element or a bonus tier was confirmed — it now only appears once the full level (all elements) title is actually earned.",
+      "🐛 Fixed a stray space showing up as \"Name 's Titles\" when a dog's name had accidental trailing whitespace.",
+    ],
+  },
   {
     version: "1.27",
     date: "August 2026",
@@ -761,7 +792,11 @@ export default function App() {
   // ── Dog management ───────────────────────────────────────────
   async function saveDog(e) {
     e.preventDefault();
-    const newDogs = dogs.map(d => d.id === editingDogId ? { ...dogForm } : d);
+    // Trim name fields — a stray trailing space (easy to type without
+    // noticing) shows up as an awkward gap before "'s Titles"/"'s Class
+    // Progress" elsewhere in the app.
+    const cleaned = { ...dogForm, callName: (dogForm.callName||"").trim(), name: (dogForm.name||"").trim() };
+    const newDogs = dogs.map(d => d.id === editingDogId ? cleaned : d);
     setDogs(newDogs); setEditingDogId(null);
     await saveUserData({ dogs: newDogs });
   }
@@ -1735,9 +1770,10 @@ export default function App() {
             }
             <div>
               <div style={{ color:"#fff", fontSize:17, fontWeight:"bold" }}>NoseWork Notebook</div>
-              <div style={{ color:"rgba(255,255,255,0.75)", fontSize:11 }}>
-                {activeDog?.callName || "Set up your dog"} · {user.displayName?.split(" ")[0] || ""}
-                {dogs.length>1&&<span style={{ opacity:0.7 }}> · {dogs.length} dogs</span>}
+              <div style={{ color:"rgba(255,255,255,0.75)", fontSize:11, display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
+                {(activeDog?.callName||"").trim() || "Set up your dog"}
+                {activeDog && <DogTitleBadges results={myResults} dark size={9}/>}
+                <span>· {user.displayName?.split(" ")[0] || ""}{dogs.length>1&&<span style={{ opacity:0.7 }}> · {dogs.length} dogs</span>}</span>
               </div>
             </div>
           </div>
@@ -2446,7 +2482,7 @@ export default function App() {
         {tab==="Titles" && (
           <div>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-              <div style={{ fontWeight:"bold", fontSize:16, color:"#5b21b6" }}>🏆 {activeDog?.callName}'s Titles</div>
+              <div style={{ fontWeight:"bold", fontSize:16, color:"#5b21b6" }}>🏆 {(activeDog?.callName||"").trim()}'s Titles</div>
               <button onClick={()=>{ setShowTitleForm(!showTitleForm); setEditingTitleId(null); setTitleForm({org:"NACSW",title:"",trial:"",date:""}); setTitleCertFile(null); }} style={{ ...btnStyle("#7c3aed"), background:"linear-gradient(135deg,#7c3aed,#06b6d4)", fontSize:12, padding:"6px 14px" }}>
                 {showTitleForm && !editingTitleId ? "Cancel" : "+ Add Existing Title"}
               </button>
@@ -2651,7 +2687,7 @@ export default function App() {
               const currentLevel = myClassProgress.levels.find(l=>l.classes.some(c=>!c.attended)) || myClassProgress.levels[myClassProgress.levels.length-1];
               return (
                 <>
-                  <div style={{ fontWeight:"bold", fontSize:16, marginBottom:4, color:"#5b21b6" }}>🎓 {activeDog?.callName}'s Class Progress</div>
+                  <div style={{ fontWeight:"bold", fontSize:16, marginBottom:4, color:"#5b21b6" }}>🎓 {(activeDog?.callName||"").trim()}'s Class Progress</div>
                   <div style={{ fontSize:13, color:"#888", marginBottom:16 }}>Track attendance and notes through the 6-level foundations program. Switch to "Trialing" from My Dogs once you start competing.</div>
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:18 }}>
                     <StatCard label="Current Level" value={currentLevel?.level||6} icon="🎓"/>
