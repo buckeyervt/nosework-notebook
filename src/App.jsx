@@ -17,8 +17,60 @@ import { storage } from "./firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 // ── Constants ────────────────────────────────────────────────
 const ORGS = ["NACSW", "UKC", "AKC", "USCSS/Other"];
-const ORG_COLORS = { NACSW: "#e07b39", UKC: "#3a7bd5", AKC: "#c0392b", "USCSS/Other": "#27ae60" };
-const ORG_BG     = { NACSW: "#fff5ee", UKC: "#eef4ff", AKC: "#fff0f0", "USCSS/Other": "#f0fff5" };
+// NACSW is blue, UKC is amber/gold — swapped from the original orange/blue
+// pairing because NACSW's orange read too close to AKC's red at badge size.
+const ORG_COLORS = { NACSW: "#3a7bd5", UKC: "#b45309", AKC: "#c0392b", "USCSS/Other": "#27ae60" };
+const ORG_BG     = { NACSW: "#eef4ff", UKC: "#fff8e1", AKC: "#fff0f0", "USCSS/Other": "#f0fff5" };
+// Short 1-2 letter abbreviation per level, for the compact title badge next
+// to a dog's name — NACSW's own level names (NW1/NW2/NW3) are already short
+// enough to use as-is.
+const LEVEL_ABBR = {
+  NACSW: (level) => level,
+  AKC: (level) => ({ Novice: "N", Advanced: "A", Excellent: "E", Master: "M" }[level] || level),
+  UKC: (level) => ({ Novice: "N", Advanced: "A", Superior: "S", Master: "M", Elite: "E" }[level] || level),
+  "USCSS/Other": (level) => ({ Novice: "N", Intermediate: "I", Advanced: "A", Senior: "S", Master: "M" }[level] || level),
+};
+// For each org, the highest currently-held level badge (from the auto-detection
+// engine), plus whether a bonus/Elite-style tier is also held underneath it.
+// Falls back to the most recent manually-entered title for that org when the
+// engine hasn't detected a level yet (e.g. historical pre-app titles, or
+// NACSW's Elite/Summit/Champion tiers which aren't auto-detected).
+function highestOrgBadges(results) {
+  const badges = [];
+  for (const org of ORGS) {
+    const levels = ORG_LEVELS[org] || [];
+    const earned = detectEarnedTitles(org, results || []);
+    const earnedKeys = new Set(earned.map(e => e.key));
+    let highestLevel = null;
+    for (let i = levels.length - 1; i >= 0; i--) {
+      const lvl = levels[i];
+      if (earnedKeys.has(`${org}|level|${lvl}`) || earnedKeys.has(`${org}|classic|${lvl}`)) { highestLevel = lvl; break; }
+    }
+    const manualForOrg = (results || []).filter(r => r.org === org && r.isTitleOnly && r.title);
+    let hasBonus = org === "AKC" && earned.some(e => e.key.startsWith("AKC|eliteLevel|") || e.key.startsWith("AKC|elite|"));
+    if (!hasBonus) hasBonus = manualForOrg.some(r => /elite|summit|champion/i.test(r.title));
+    if (highestLevel) {
+      badges.push({ org, abbr: (LEVEL_ABBR[org] ? LEVEL_ABBR[org](highestLevel) : highestLevel), hasBonus });
+    } else if (manualForOrg.length > 0) {
+      const latest = manualForOrg.slice().sort((a, b) => (a.date || "").localeCompare(b.date || "")).pop();
+      badges.push({ org, abbr: (latest.title || "").slice(0, 6), hasBonus });
+    }
+  }
+  return badges;
+}
+// Compact pill row for a dog's name — one pill per org she's titled in,
+// colored by org, showing the highest level held; a small star means she
+// also holds a bonus/Elite-style tier at an earlier level in that same org.
+function DogTitleBadges({ results }) {
+  const badges = highestOrgBadges(results);
+  if (badges.length === 0) return null;
+  return badges.map(b => (
+    <span key={b.org} style={{ position: "relative", display: "inline-block", background: (ORG_COLORS[b.org] || "#999") + "22", color: ORG_COLORS[b.org] || "#999", borderRadius: 20, padding: "2px 9px", fontSize: 11, fontWeight: "bold" }} title={`${b.org} — ${b.abbr}${b.hasBonus ? " + bonus tier" : ""}`}>
+      {b.abbr}
+      {b.hasBonus && <span style={{ position: "absolute", top: -6, right: -6, fontSize: 9 }}>⭐</span>}
+    </span>
+  ));
+}
 const ADMIN_PIN  = "1234"; // ← Change this before sharing!
 const ORG_IDS = [
   { org: "NACSW",        key: "nacsw",  label: "NACSW #",                  placeholder: "e.g. K040827"       },
@@ -38,8 +90,17 @@ const TRAINING_TABS = [...PRIMARY_TRAINING_TABS, ...MORE_TRAINING_TABS];
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.26";
+const APP_VERSION = "1.27";
 const WHATS_NEW = [
+  {
+    version: "1.27",
+    date: "August 2026",
+    title: "Title Badges on My Dogs",
+    items: [
+      "🏅 Your dog's name on the My Dogs tab now shows a small colored pill per org she's titled in, with her highest current level — a star means she's also picked up a bonus/Elite-style tier along the way.",
+      "🎨 Swapped NACSW to blue and UKC to amber/gold — the old orange NACSW color was too close to AKC's red at badge size.",
+    ],
+  },
   {
     version: "1.26",
     date: "August 2026",
@@ -2830,6 +2891,7 @@ export default function App() {
                   <span style={{ fontSize:11, fontWeight:"bold", background: dogStatus==="training"?"#fef3c7":"#e8f8ee", color: dogStatus==="training"?"#b45309":"#27ae60", borderRadius:20, padding:"2px 10px" }}>
                     {dogStatus==="training" ? "🎓 In Training" : "🏆 Trialing"}
                   </span>
+                  <DogTitleBadges results={myResults}/>
                 </div>
                 {activeDog.name&&activeDog.callName&&<div style={{ color:"#888", fontSize:14, marginTop:2 }}>"{activeDog.callName}"</div>}
                 {activeDog.breed&&<div style={{ color:"#777", fontSize:13, marginTop:2 }}>{activeDog.breed}</div>}
