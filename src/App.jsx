@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { db } from "./firebase";
 import { MASTER_TRIALS } from "./trials";
 import { CHEAT_SHEETS } from "./rulesCheatSheets";
-import { detectEarnedTitles, getTitleDefs, elementProgress, ORG_ELEMENTS, ORG_LEVELS, ORG_OFFERINGS } from "./titleRules";
+import { detectEarnedTitles, getTitleDefs, elementProgress, ORG_ELEMENTS, ORG_LEVELS, ORG_OFFERINGS, GAME_NAMES } from "./titleRules";
 import { parseAKCEventCsv } from "./akcImport";
 import {
   collection, doc, setDoc, deleteDoc, onSnapshot,
@@ -32,8 +32,19 @@ const TRAINING_TABS = ["Dashboard", "Class Progress", "Training", "My Dogs", "Ru
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.23";
+const APP_VERSION = "1.24";
 const WHATS_NEW = [
+  {
+    version: "1.24",
+    date: "August 2026",
+    title: "Track What You Entered + USCSS Games Titles",
+    items: [
+      "📝 On the Trials tab, once you're Waitlisted or Entered you'll see a \"What did you enter?\" chip picker so exactly which classes/games you're in for that trial is on record — no more digging through confirmation emails after a show.",
+      "🎮 The Games cheat sheet now explains what each of the 8 USCSS games actually involves (Copy Cat, Double Dog Dare, Go the Distance, Heap O'Hides, LudicrouSpeed, Pairs Challenge, Scenting Sweepstakes, Team Spirit), not just their scoring numbers.",
+      "🏆 Game results now use a dropdown of the real 8 game names, and the app auto-suggests each game's title plus the full USCSS Gamer ladder (DDGA, Bronze/Silver/Gold, Gamer Pro/DDGP, Championship/DDCH) on the Titles tab, same as element titles.",
+      "🐛 Fixed the \"+ Add Run\" button silently closing instead of opening a fresh run form when clicked while mid-edit, and added a reassurance note when you log two runs of the same element/level/game for one trial — that's fully supported, both save as separate runs.",
+    ],
+  },
   {
     version: "1.23",
     date: "August 2026",
@@ -700,9 +711,22 @@ export default function App() {
     setRegistrations(newRegs);
     await saveUserData({ registrations: newRegs });
   }
+  // Which specific classes/games she actually entered for a trial — so it's
+  // on record here instead of buried in a confirmation email.
+  async function toggleClassEntered(trialId, cls) {
+    if (!activeDog) return;
+    const current = dogRegs[trialId] || { status:"none", paid:false, classesEntered:[] };
+    const have = current.classesEntered || [];
+    const classesEntered = have.includes(cls) ? have.filter(c=>c!==cls) : [...have, cls];
+    const updated = { ...current, classesEntered };
+    const newRegs = { ...registrations, [activeDog.id]: { ...(registrations[activeDog.id]||{}), [trialId]: updated }};
+    setRegistrations(newRegs);
+    await saveUserData({ registrations: newRegs });
+  }
   const dogRegs = activeDog ? (registrations[activeDog.id] || {}) : {};
   const getStatus = (trialId) => dogRegs[trialId]?.status || "none";
   const getPaid   = (trialId) => dogRegs[trialId]?.paid || false;
+  const getClassesEntered = (trialId) => dogRegs[trialId]?.classesEntered || [];
   // ── Results ──────────────────────────────────────────────────
   const blankResultForm = () => ({ org:"NACSW", trial:"", date:"", title:"", notes:"", videoLink:"", trialType:"", runs:[] });
   const blankRunResultForm = () => ({ element:"Interior", level:"", result:"Pass", isGame:false, gameName:"", place:"", outOf:"", time:"", notes:"", videoUrl:"", points:"", faults:"" });
@@ -1840,6 +1864,36 @@ export default function App() {
                       </div>
                     )}
                   </div>
+                  {/* What did I actually enter — so it's on record here instead of
+                      buried in a confirmation email. Uses this trial's specific
+                      offered classes if the admin filled them in, otherwise falls
+                      back to the full list of what that org offers. */}
+                  {(status==="waitlist"||status==="entered") && (() => {
+                    const trialLevels = Array.isArray(t.level) ? t.level : (t.level ? [t.level] : []);
+                    const options = trialLevels.length > 0 ? trialLevels : (ORG_OFFERINGS[t.org] || []);
+                    if (options.length === 0) return null;
+                    const entered = getClassesEntered(t.id);
+                    return (
+                      <div style={{ marginTop:10, paddingTop:10, borderTop:"1px solid rgba(0,0,0,0.06)" }}>
+                        <div style={{ fontSize:11, color:"#888", marginBottom:5, fontWeight:"bold" }}>
+                          What did you enter?{entered.length>0 && <span style={{ color:"#27ae60", fontWeight:"normal" }}> ({entered.length} selected)</span>}
+                        </div>
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
+                          {options.map(cls => {
+                            const on = entered.includes(cls);
+                            return (
+                              <button key={cls} onClick={()=>toggleClassEntered(t.id, cls)} style={{
+                                background: on ? "linear-gradient(135deg,#7c3aed,#06b6d4)" : "#fff",
+                                color: on ? "#fff" : "#7c3aed",
+                                border:`1px solid ${on?"transparent":"#ddd6fe"}`,
+                                borderRadius:20, padding:"4px 11px", fontSize:11, cursor:"pointer", fontWeight: on?"bold":"normal"
+                              }}>{cls}</button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}
@@ -1940,7 +1994,21 @@ export default function App() {
                 {/* ── RUNS ── */}
                 <div style={{ margin:"14px 0 8px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                   <div style={{ fontWeight:"bold", fontSize:13, color:"#5b21b6" }}>Runs ({resultForm.runs?.length||0})</div>
-                  <button type="button" onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); setRunResultForm(blankRunResultForm()); setEditingRunResultIdx(null); setShowRunResultForm(!showRunResultForm); }} style={{ ...btnStyle("#06b6d4",true), padding:"3px 12px", fontSize:11 }}>
+                  <button type="button" onClick={(e)=>{
+                    e.preventDefault(); e.stopPropagation();
+                    // If a fresh (non-edit) Add Run form is already open, this button
+                    // is acting as "Cancel" — close it. Otherwise (closed, OR mid-edit
+                    // of an existing run) always open a brand-new blank run form —
+                    // previously this toggled off instead of opening fresh when clicked
+                    // while editing, making it look like the click did nothing.
+                    if (showRunResultForm && editingRunResultIdx===null) {
+                      setShowRunResultForm(false);
+                    } else {
+                      setRunResultForm(blankRunResultForm());
+                      setEditingRunResultIdx(null);
+                      setShowRunResultForm(true);
+                    }
+                  }} style={{ ...btnStyle("#06b6d4",true), padding:"3px 12px", fontSize:11 }}>
                     {showRunResultForm && editingRunResultIdx===null ? "Cancel" : "+ Add Run"}
                   </button>
                 </div>
@@ -2022,6 +2090,24 @@ export default function App() {
                     {isStandardLevel && (
                       <div style={{ fontSize:10, color:"#888", marginTop:-6, marginBottom:6 }}>Section is optional — just for your own records, it doesn't affect qualifying.</div>
                     )}
+                    {/* Reassurance when this run matches another run already added to
+                        THIS trial entry — e.g. two runs of the same element/level/game
+                        because the trial offered it twice. There's no limit on this;
+                        both will save as separate runs (Run 1, Run 2, etc.). */}
+                    {(() => {
+                      const dupeCount = (resultForm.runs||[]).filter((r,i) =>
+                        i !== editingRunResultIdx &&
+                        r.element === runResultForm.element &&
+                        (r.level||"") === (runResultForm.level||"") &&
+                        (!runResultForm.isGame || r.gameName === runResultForm.gameName)
+                      ).length;
+                      if (dupeCount === 0) return null;
+                      return (
+                        <div style={{ background:"#f0fdf4", border:"1px solid #86efac", borderRadius:8, padding:"6px 10px", marginBottom:8, fontSize:11, color:"#166534" }}>
+                          ℹ️ You already have {dupeCount} other run logged for {runResultForm.element}{runResultForm.level?` ${runResultForm.level}`:""}{runResultForm.isGame&&runResultForm.gameName?` (${runResultForm.gameName})`:""} on this trial — that's fine, this will save as its own separate run.
+                        </div>
+                      );
+                    })()}
                     {/* Live progress toward the element title, based on runs already logged */}
                     {isStandardLevel && runResultForm.element && (() => {
                       const progress = elementProgress(resultForm.org, runResultForm.element, parsedLevelBase, myResults);
@@ -2071,7 +2157,13 @@ export default function App() {
                       <span style={{ fontSize:12, color:"#5b21b6", fontWeight:"bold" }}>🎮 This was a game element</span>
                     </label>
                     {runResultForm.isGame && (
-                      <input style={inputStyle} value={runResultForm.gameName||""} onChange={e=>setRunResultForm({...runResultForm,gameName:e.target.value})} placeholder="Game name e.g. Hide of Hides, Handler Discrimination…"/>
+                      <select style={inputStyle} value={runResultForm.gameName||""} onChange={e=>setRunResultForm({...runResultForm,gameName:e.target.value})}>
+                        <option value="" disabled>Select the game…</option>
+                        {GAME_NAMES.map(g=><option key={g} value={g}>{g}</option>)}
+                      </select>
+                    )}
+                    {runResultForm.isGame && runResultForm.gameName && (
+                      <div style={{ fontSize:10, color:"#888", marginTop:2 }}>💡 Games earn their own title (and count toward your Gamer titles) once qualifying — logging Points/Faults above lets the app auto-suggest it on the Titles tab.</div>
                     )}
                     <label style={labelStyle}>Run Notes</label>
                     <input style={inputStyle} value={runResultForm.notes||""} onChange={e=>setRunResultForm({...runResultForm,notes:e.target.value})} placeholder="What happened on this run…"/>
