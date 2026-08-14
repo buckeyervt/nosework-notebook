@@ -171,7 +171,7 @@ export const CHEAT_SHEETS = {
       {
         heading: "Games Basics",
         bullets: [
-          "Games aren't leveled — same rules for everyone, all capped at Advanced-level difficulty. Each has its own hide count and scoring bar (see below), but a single qualifying run earns that game's title.",
+          "Games aren't leveled — same rules for everyone, all capped at Advanced-level difficulty. Each has its own hide count and scoring bar (see below); 3 qualifying runs (Qs) in that SAME game earns its title, just like an Element title.",
           "**Copy Cat** (DDCC): 1 known hide. Handler can't enter the search area, and once the dog is released, can't move or talk — the judge calls \"alert\" when the dog clearly indicates. 0 false alerts, 95 pts min.",
           "**Double Dog Dare** (DDFO): 1–2 known hides. Handler draws an action/word from a hat and must do it the whole search (redrawing costs 5 pts); up to 2 false alerts, 90 pts min.",
           "**Go the Distance** (DDDI): 1 hide, 6–10 ft outside a marked boundary. Handler must stay outside the boundary and can't cross to reward until after calling \"Alert\" and getting the judge's OK. 0 false alerts, 95 pts min.",
@@ -201,7 +201,8 @@ export const CHEAT_SHEETS = {
           "**Full level title** (Variable): 3 Qs in each of the 4 elements at that level.",
           "**Classic title**: Qs in all 4 elements in the SAME Classic trial.",
           "You don't have to finish every Novice title before starting Intermediate — earning any level's title unlocks the next level.",
-          "**Gamer titles**: DDGA (titles in 5 different games) → Bronze/Silver/Gold (title in a 6th/7th/8th different game — Gold = every game). Then **DDGP** (Gamer Pro) once you've got 10 total qualifying game runs — repeats of the same game count — with **DDGPX** repeating every 5 more after that.",
+          "Each individual **game title** needs 3 Qs in that same game (e.g. 3 qualifying Copy Cat runs = DDCC) — same pattern as an Element title, just not leveled.",
+          "**Gamer titles**: DDGA (titles in 5 different games) → Bronze/Silver/Gold (title in a 6th/7th/8th different game — Gold = every game). Then **DDGP** (Gamer Pro) once you've got 10 total Game Titles — repeats of the same game count — with **DDGPX** repeating every 5 more Game Titles after that.",
           "**Championship (DDCH)**: a Master title (Classic or Variable) + a DDGA (Gamer) title.",
         ],
       },
