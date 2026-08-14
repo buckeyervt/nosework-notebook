@@ -20,12 +20,18 @@
 //     nextLevel is attached to the composite/level titles instead.
 // `nextLevel` is null once a dog is already at the top level for that org.
 //
+// USCSS/Other Games titles ARE also auto-detected (see the "USCSS Games"
+// block near the bottom of detectEarnedTitles) — individual game titles
+// (DDCC, DDFO, etc.), the Gamer ladder (DDGA/Bronze/Silver/Gold), Gamer Pro
+// (DDGP/DDGPX), and Championship (DDCH), all straight from Table 6/7/8 of
+// the USCSS rulebook.
+//
 // What is NOT auto-detected (add these manually from the Titles tab):
-// NACSW's Elite/Summit/Champion/Grand Champion tiers, Skills Achievement
-// Challenges, and Games titles — these depend on cumulative point totals
-// across many trials, judge counts, or B-section leg tracking that this
-// app doesn't capture at the per-run level. Detecting them wrong would be
-// worse than not detecting them, so they're left for manual entry.
+// NACSW's Elite/Summit/Champion/Grand Champion tiers and Skills Achievement
+// Challenges — these depend on cumulative point totals across many trials,
+// judge counts, or B-section leg tracking that this app doesn't capture at
+// the per-run level. Detecting them wrong would be worse than not detecting
+// them, so they're left for manual entry.
 
 export const ORG_ELEMENTS = {
   NACSW: ["Container", "Exterior", "Interior", "Vehicle"],
@@ -74,6 +80,38 @@ export const ORG_OFFERINGS = {
     "LudicrouSpeed", "Pairs Challenge", "Scenting Sweepstakes", "Team Spirit",
   ],
 };
+
+// ── USCSS Games ──────────────────────────────────────────────────
+// Games aren't leveled — each one has a single fixed pass bar (Table 6 in
+// the rulebook): a minimum point score and a max number of false alerts.
+// One qualifying run in a game earns that game's title outright (no leg
+// count, unlike Elements). This exact list is also what should populate
+// the "Game" dropdown wherever a competitor logs a game run, so the names
+// always match what this engine is looking for.
+export const GAME_NAMES = [
+  "Copy Cat", "Double Dog Dare", "Go the Distance", "Heap O'Hides",
+  "LudicrouSpeed", "Pairs Challenge", "Scenting Sweepstakes", "Team Spirit",
+];
+
+const GAME_CRITERIA = {
+  "Copy Cat":             { code: "DDCC", name: "Detection Dog Copy Cat",        minPoints: 95, maxFaults: 0 },
+  "Double Dog Dare":      { code: "DDFO", name: "Detection Dog Focus",           minPoints: 90, maxFaults: 2 },
+  "Go the Distance":      { code: "DDDI", name: "Detection Dog Distance",        minPoints: 95, maxFaults: 0 },
+  "Heap O'Hides":         { code: "DDEN", name: "Detection Dog Endurance",       minPoints: 50, maxFaults: 2 },
+  "LudicrouSpeed":        { code: "DDLS", name: "Detection Dog Speed",           minPoints: 50, maxFaults: 2 },
+  "Pairs Challenge":      { code: "DDPC", name: "Detection Dog Pairs Challenge", minPoints: 75, maxFaults: 2 },
+  "Scenting Sweepstakes": { code: "DDSW", name: "Detection Dog Sweepstakes",     minPoints: 75, maxFaults: 0 },
+  "Team Spirit":          { code: "DDTW", name: "Detection Dog Teamwork",       minPoints: 90, maxFaults: 2 },
+};
+
+// Mirrors matchingLegs()'s "only check faults/points if they were actually
+// logged" leniency — points/faults are optional fields on a run, so a run
+// with a "Pass" result but no numbers filled in still counts.
+function gameQualifies(run, crit) {
+  return run.result === "Pass" &&
+    (run.faults === "" || run.faults == null || Number(run.faults) <= crit.maxFaults) &&
+    (run.points === "" || run.points == null || Number(run.points) >= crit.minPoints);
+}
 
 function flattenRuns(results, org) {
   // One row per run, tagged with which trial (result record) it came from.
@@ -361,6 +399,95 @@ export function detectEarnedTitles(org, results) {
             : `SW${lvlCode[level]}E${tier} (${level} Level Elite Title ${tier})`,
           org, date: null, trialName: null, trialId: null,
           nextLevel: null,
+        });
+      }
+    }
+  }
+
+  // ── USCSS Games ────────────────────────────────────────────────
+  // Per Table 6/7/8 of the rulebook:
+  //   - Each game's own title (DDCC, DDFO...) is earned with 1 qualifying run.
+  //   - DDGA needs titles in 5 DIFFERENT games; Bronze/Silver/Gold add a
+  //     6th/7th/8th different game (Gold = all 8, since that's the whole list).
+  //   - DDGP doesn't require different games — it's earned once 10 total
+  //     qualifying game runs have accumulated (repeats of the same game
+  //     count), then DDGPX repeats every 5 more after that.
+  //   - Championship (DDCH) = a Master level title + DDGA.
+  if (org === "USCSS/Other") {
+    const gameRuns = flat.filter(run => run.isGame && GAME_CRITERIA[run.gameName]);
+
+    // Individual game titles — date of the FIRST qualifying run in each game.
+    const titledGames = [];
+    for (const gname of GAME_NAMES) {
+      const crit = GAME_CRITERIA[gname];
+      const qualifying = gameRuns
+        .filter(run => run.gameName === gname && gameQualifies(run, crit))
+        .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+      if (qualifying.length > 0) {
+        const first = qualifying[0];
+        earned.push({
+          key: `USCSS/Other|game|${gname}`,
+          label: `${crit.code} (${crit.name} — ${gname} Game Title)`,
+          org, date: first.date, trialName: first.trialName, trialId: first.trialId,
+          nextLevel: null,
+        });
+        titledGames.push({ name: gname, date: first.date });
+      }
+    }
+
+    // Gamer ladder — by count of distinct games titled, in the order each
+    // was first earned.
+    titledGames.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    const gamerTiers = [
+      { count: 5, key: "DDGA",  label: "DDGA (Detection Dog Gamer — titles in 5 different games)" },
+      { count: 6, key: "DDGAB", label: "DDGAB (Detection Dog Gamer Bronze — title in a 6th different game)" },
+      { count: 7, key: "DDGAS", label: "DDGAS (Detection Dog Gamer Silver — title in a 7th different game)" },
+      { count: 8, key: "DDGAG", label: "DDGAG (Detection Dog Gamer Gold — title in an 8th different game)" },
+    ];
+    let ddgaEarned = null;
+    for (const tier of gamerTiers) {
+      if (titledGames.length >= tier.count) {
+        const last = titledGames[tier.count - 1];
+        earned.push({ key: `USCSS/Other|gamer|${tier.key}`, label: tier.label, org, date: last.date, trialName: null, trialId: null, nextLevel: null });
+        if (tier.key === "DDGA") ddgaEarned = last.date;
+      }
+    }
+
+    // Gamer Pro — every qualifying game run counts toward the running
+    // total, repeats of the same game included: 10 for DDGP, then +5 for
+    // each DDGPX after that.
+    const allQualifyingRuns = gameRuns
+      .filter(run => gameQualifies(run, GAME_CRITERIA[run.gameName]))
+      .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    if (allQualifyingRuns.length >= 10) {
+      earned.push({
+        key: "USCSS/Other|gamerPro|0",
+        label: "DDGP (Detection Dog Gamer Pro — 10 Game titles)",
+        org, date: allQualifyingRuns[9]?.date, trialName: null, trialId: null, nextLevel: null,
+      });
+      const extraTiers = Math.floor((allQualifyingRuns.length - 10) / 5);
+      for (let t = 1; t <= extraTiers; t++) {
+        const idx = 10 + t * 5 - 1;
+        earned.push({
+          key: `USCSS/Other|gamerPro|${t}`,
+          label: t === 1
+            ? `DDGPX (Detection Dog Gamer Pro X — ${10 + t * 5} Game titles)`
+            : `DDGPX${t} (Detection Dog Gamer Pro X ${t} — ${10 + t * 5} Game titles)`,
+          org, date: allQualifyingRuns[idx]?.date, trialName: null, trialId: null, nextLevel: null,
+        });
+      }
+    }
+
+    // Championship — Master (Classic or Variable) level title + DDGA.
+    if (ddgaEarned) {
+      const masterHeld = satisfied["USCSS/Other|level|Master"] || satisfied["USCSS/Other|classic|Master"];
+      if (masterHeld) {
+        const masterEntry = earned.find(e => e.key === "USCSS/Other|level|Master" || e.key === "USCSS/Other|classic|Master");
+        const champDate = [masterEntry?.date, ddgaEarned].filter(Boolean).sort().pop();
+        earned.push({
+          key: "USCSS/Other|championship",
+          label: "DDCH (Detection Dog Champion — Master title + DDGA)",
+          org, date: champDate, trialName: null, trialId: null, nextLevel: null,
         });
       }
     }
