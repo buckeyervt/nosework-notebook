@@ -38,8 +38,16 @@ const TRAINING_TABS = [...PRIMARY_TRAINING_TABS, ...MORE_TRAINING_TABS];
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.25";
+const APP_VERSION = "1.26";
 const WHATS_NEW = [
+  {
+    version: "1.26",
+    date: "August 2026",
+    title: "Games Title Fix",
+    items: [
+      "🐛 Fixed Game titles (Copy Cat, Team Spirit, etc.) auto-suggesting after just 1 qualifying run — they actually need 3 Qs in that same game, exactly like an Element title. Gamer Pro (DDGP/DDGPX) now counts total Game Titles earned rather than raw qualifying runs to match.",
+    ],
+  },
   {
     version: "1.25",
     date: "August 2026",
@@ -2212,7 +2220,7 @@ export default function App() {
                       </select>
                     )}
                     {runResultForm.isGame && runResultForm.gameName && (
-                      <div style={{ fontSize:10, color:"#888", marginTop:2 }}>💡 Games earn their own title (and count toward your Gamer titles) once qualifying — logging Points/Faults above lets the app auto-suggest it on the Titles tab.</div>
+                      <div style={{ fontSize:10, color:"#888", marginTop:2 }}>💡 3 qualifying runs in this same game earns its title (just like an Element) — logging Points/Faults above lets the app track that and auto-suggest it on the Titles tab.</div>
                     )}
                     <label style={labelStyle}>Run Notes</label>
                     <input style={inputStyle} value={runResultForm.notes||""} onChange={e=>setRunResultForm({...runResultForm,notes:e.target.value})} placeholder="What happened on this run…"/>
