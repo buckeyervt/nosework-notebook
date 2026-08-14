@@ -27,13 +27,28 @@ const ORG_IDS = [
   { org: "USCSS/Other",  key: "uscss",  label: "USCSS Member #",            placeholder: "e.g. your USCSS ID" },
 ];
 const auth = getAuth();
-const TRIALING_TABS = ["Dashboard", "Trials", "Results", "Titles", "Training", "My Dogs", "Rules & Regs", "Account", "Ideas 💡"];
-const TRAINING_TABS = ["Dashboard", "Class Progress", "Training", "My Dogs", "Rules & Regs", "Account", "Ideas 💡"];
+// Header nav is split into always-visible "primary" tabs and a "More ▾"
+// dropdown for the rest, to keep the top bar from getting crowded.
+const PRIMARY_TRIALING_TABS = ["Dashboard", "Trials", "Results", "Training", "My Dogs"];
+const MORE_TRIALING_TABS = ["Titles", "Rules & Regs", "Account", "Ideas 💡"];
+const PRIMARY_TRAINING_TABS = ["Dashboard", "Class Progress", "Training", "My Dogs"];
+const MORE_TRAINING_TABS = ["Rules & Regs", "Account", "Ideas 💡"];
+const TRIALING_TABS = [...PRIMARY_TRIALING_TABS, ...MORE_TRIALING_TABS];
+const TRAINING_TABS = [...PRIMARY_TRAINING_TABS, ...MORE_TRAINING_TABS];
 // ── What's New ───────────────────────────────────────────────
 // To add a release: prepend a new entry to this array and bump APP_VERSION.
 // Every user who hasn't seen the new version will get the modal automatically.
-const APP_VERSION = "1.24";
+const APP_VERSION = "1.25";
 const WHATS_NEW = [
+  {
+    version: "1.25",
+    date: "August 2026",
+    title: "Cleaner Header — More Menu",
+    items: [
+      "🧭 The top nav is decluttered: Dashboard, Trials, Results, Training and My Dogs stay front and center; Titles, Rules & Regs, Account, What's New and Ideas now live under a new \"More ▾\" menu.",
+      "✨ The What's New button moved into that More menu too — still flags a dot when there's something you haven't seen yet.",
+    ],
+  },
   {
     version: "1.24",
     date: "August 2026",
@@ -316,6 +331,8 @@ export default function App() {
   // ── What's New ───────────────────────────────────────────────
   const [showWhatsNew, setShowWhatsNew]   = useState(false);
   const [whatsNewSeen, setWhatsNewSeen]   = useState(() => localStorage.getItem("nwn_seen_version") || "");
+  // ── Header "More" dropdown ───────────────────────────────────
+  const [showMoreMenu, setShowMoreMenu]   = useState(false);
   // ── Feature requests ─────────────────────────────────────────
   const [featureRequests, setFeatureRequests] = useState([]);
   const [ideaText, setIdeaText]           = useState("");
@@ -384,6 +401,8 @@ export default function App() {
   const activeDog = dogs.find(d => d.id === activeDogId) || dogs[0];
   const dogStatus = activeDog?.status || "trialing";
   const TABS = dogStatus === "training" ? TRAINING_TABS : TRIALING_TABS;
+  const PRIMARY_TABS = dogStatus === "training" ? PRIMARY_TRAINING_TABS : PRIMARY_TRIALING_TABS;
+  const MORE_TABS = dogStatus === "training" ? MORE_TRAINING_TABS : MORE_TRIALING_TABS;
   useEffect(() => {
     if (!TABS.includes(tab)) setTab("Dashboard");
   }, [dogStatus]);
@@ -1638,7 +1657,7 @@ export default function App() {
           {savedToast}
         </div>
       )}
-      <div style={{ background:"linear-gradient(135deg,#6b21a8,#7c3aed,#06b6d4)", padding:"14px 18px 0", boxShadow:"0 4px 20px rgba(0,0,0,0.2)" }}>
+      <div style={{ background:"linear-gradient(135deg,#6b21a8,#7c3aed,#06b6d4)", padding:"14px 18px 0", boxShadow:"0 4px 20px rgba(0,0,0,0.2)", position:"relative" }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             {activeDog&&photos[activeDog.id]
@@ -1654,19 +1673,49 @@ export default function App() {
             </div>
           </div>
           <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-            <button onClick={()=>setShowWhatsNew(true)} style={{ background:"rgba(255,255,255,0.25)", border:"1px solid rgba(255,255,255,0.5)", color:"#fff", borderRadius:20, padding:"4px 10px", fontSize:12, fontWeight:"bold", cursor:"pointer", position:"relative", display:"flex", alignItems:"center", gap:5 }}>
-              ✨ What's New
-              {whatsNewSeen !== APP_VERSION && <span style={{ width:8, height:8, background:"#f59e0b", borderRadius:"50%", display:"inline-block", flexShrink:0 }}/>}
-            </button>
             <button onClick={()=>setShowAdmin(true)} style={{ background:"transparent", border:"none", color:"rgba(255,255,255,0.75)", fontSize:20, cursor:"pointer", padding:4 }}>⚙️</button>
             <button onClick={handleLogout} style={{ background:"rgba(255,255,255,0.15)", border:"none", color:"#fff", borderRadius:8, padding:"4px 10px", fontSize:11, cursor:"pointer" }}>Sign out</button>
           </div>
         </div>
         <div style={{ display:"flex", gap:2, overflowX:"auto" }}>
-          {TABS.map(t => (
+          {PRIMARY_TABS.map(t => (
             <button key={t} onClick={()=>setTab(t)} style={{ background:tab===t?"rgba(255,255,255,0.25)":"transparent", color:tab===t?"#fff":"rgba(255,255,255,0.7)", border:"none", borderRadius:"8px 8px 0 0", padding:"7px 10px", fontSize:11, fontWeight:tab===t?"bold":"normal", cursor:"pointer", whiteSpace:"nowrap" }}>{t}</button>
           ))}
+          <button onClick={()=>setShowMoreMenu(v=>!v)} style={{
+            background: (MORE_TABS.includes(tab)||showMoreMenu) ? "rgba(255,255,255,0.25)" : "transparent",
+            color: (MORE_TABS.includes(tab)||showMoreMenu) ? "#fff" : "rgba(255,255,255,0.7)",
+            border:"none", borderRadius:"8px 8px 0 0", padding:"7px 10px", fontSize:11,
+            fontWeight: MORE_TABS.includes(tab) ? "bold" : "normal", cursor:"pointer",
+            whiteSpace:"nowrap", display:"flex", alignItems:"center", gap:4,
+          }}>
+            More {showMoreMenu ? "▲" : "▼"}
+            {whatsNewSeen !== APP_VERSION && <span style={{ width:7, height:7, background:"#f59e0b", borderRadius:"50%", display:"inline-block", flexShrink:0 }}/>}
+          </button>
         </div>
+        {/* "More" dropdown — Titles/Rules & Regs/Account/Ideas (+ What's New) */}
+        {showMoreMenu && (
+          <>
+            <div onClick={()=>setShowMoreMenu(false)} style={{ position:"fixed", inset:0, zIndex:998 }}/>
+            <div style={{ position:"absolute", top:"100%", right:14, background:"#fff", borderRadius:10, boxShadow:"0 8px 24px rgba(0,0,0,0.3)", overflow:"hidden", zIndex:999, minWidth:170 }}>
+              {MORE_TABS.map(t => (
+                <button key={t} onClick={()=>{ setTab(t); setShowMoreMenu(false); }} style={{
+                  display:"block", width:"100%", textAlign:"left",
+                  background: tab===t ? "#f5f3ff" : "#fff", color: tab===t ? "#7c3aed" : "#1e1b4b",
+                  border:"none", borderBottom:"1px solid #f0eefc", padding:"10px 14px", fontSize:13,
+                  fontWeight: tab===t ? "bold" : "normal", cursor:"pointer",
+                }}>{t}</button>
+              ))}
+              <button onClick={()=>{ setShowWhatsNew(true); setShowMoreMenu(false); }} style={{
+                display:"flex", alignItems:"center", justifyContent:"space-between", gap:8,
+                width:"100%", textAlign:"left", background:"#fff", color:"#1e1b4b",
+                border:"none", padding:"10px 14px", fontSize:13, cursor:"pointer",
+              }}>
+                <span>✨ What's New</span>
+                {whatsNewSeen !== APP_VERSION && <span style={{ width:7, height:7, background:"#f59e0b", borderRadius:"50%", display:"inline-block", flexShrink:0 }}/>}
+              </button>
+            </div>
+          </>
+        )}
       </div>
       <div style={{ padding:"16px 14px", maxWidth:700, margin:"0 auto" }}>
         {!isOnline && (
