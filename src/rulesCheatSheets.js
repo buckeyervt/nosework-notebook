@@ -169,6 +169,20 @@ export const CHEAT_SHEETS = {
         ],
       },
       {
+        heading: "Games Basics",
+        bullets: [
+          "Games aren't leveled — same rules for everyone, all capped at Advanced-level difficulty. Each has its own hide count and scoring bar (see below), but a single qualifying run earns that game's title.",
+          "**Copy Cat** (DDCC): 1 known hide. Handler can't enter the search area, and once the dog is released, can't move or talk — the judge calls \"alert\" when the dog clearly indicates. 0 false alerts, 95 pts min.",
+          "**Double Dog Dare** (DDFO): 1–2 known hides. Handler draws an action/word from a hat and must do it the whole search (redrawing costs 5 pts); up to 2 false alerts, 90 pts min.",
+          "**Go the Distance** (DDDI): 1 hide, 6–10 ft outside a marked boundary. Handler must stay outside the boundary and can't cross to reward until after calling \"Alert\" and getting the judge's OK. 0 false alerts, 95 pts min.",
+          "**Heap O'Hides** (DDEN): endurance search, 1–10 unknown hides — find as many as you can before time or faults run out. Up to 2 false alerts, 50 pts min, scored as a % of hides found.",
+          "**LudicrouSpeed** (DDLS): 5–10 unknown hides against a ticking \"hide timer\" (45 sec for the first, 30 sec each after) that resets on every find. Up to 2 false alerts, 50 pts min.",
+          "**Pairs Challenge** (DDPC): 2-dog teams, 5–10 unknown hides, on-leash, only one teammate searching at a time — each dog must find at least 2 hides or it's a DQ. Up to 2 false alerts, 75 pts min.",
+          "**Scenting Sweepstakes** (DDSW): 1–5 unknown hides; top 4 placements split a pot from that game's entry fees. 0 false alerts allowed, 75 pts min.",
+          "**Team Spirit** (DDTW): 4-dog teams, 4 hides total in a set running order — one hide per teammate, and every teammate must find theirs for the team to Q. Up to 2 false alerts, 90 pts min.",
+        ],
+      },
+      {
         heading: "What to Expect",
         bullets: [
           "**Novice**: Birch only, 1 hide, 85 pts to Q, 2 ft max, 8–14 accessible containers.",
@@ -177,7 +191,6 @@ export const CHEAT_SHEETS = {
           "**Senior**: 1–3 unknown hides, 100 pts, 4 ft max, 0–2 distractors.",
           "**Master**: 0–4 unknown hides, 100 pts, 5 ft max, 0–3 distractors — the ONLY level where failing to call \"Finish\" is a fault.",
           "**Extreme**: 1,500–3,500 sqft, up to 3 elements combined, 7–10 unknown hides, 10-min limit, 1 false alert allowed, 75 pts min.",
-          "Games each have their own hide counts/scoring — e.g. Heap O'Hides allows 2 false alerts with a 50-pt min; Copy Cat is 1 known hide, 0 false alerts, 95-pt min.",
           "No fixed time limit is written into the rulebook for standard element searches — the host/judge sets it per search.",
         ],
       },
@@ -188,8 +201,8 @@ export const CHEAT_SHEETS = {
           "**Full level title** (Variable): 3 Qs in each of the 4 elements at that level.",
           "**Classic title**: Qs in all 4 elements in the SAME Classic trial.",
           "You don't have to finish every Novice title before starting Intermediate — earning any level's title unlocks the next level.",
-          "**Gamer titles**: DDGA (5 different games) → Bronze/Silver/Gold (6th/7th/8th game) → DDGP (10 games total).",
-          "**Championship**: a Master title (Classic or Variable) + a DDGA (Gamer) title.",
+          "**Gamer titles**: DDGA (titles in 5 different games) → Bronze/Silver/Gold (title in a 6th/7th/8th different game — Gold = every game). Then **DDGP** (Gamer Pro) once you've got 10 total qualifying game runs — repeats of the same game count — with **DDGPX** repeating every 5 more after that.",
+          "**Championship (DDCH)**: a Master title (Classic or Variable) + a DDGA (Gamer) title.",
         ],
       },
       {
